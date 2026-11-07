@@ -1,0 +1,473 @@
+// ProjectFlow — Prisma schema (PostgreSQL)
+// Source of truth for the data model. See docs/DATABASE_DESIGN.md for the ERD and
+// the reasoning behind the Reminder / Occurrence / Notification split.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum ProjectStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum ChecklistStatus {
+  PENDING
+  COMPLETED
+}
+
+enum ProjectMemberRole {
+  OWNER
+  MEMBER
+}
+
+enum ReminderEntityType {
+  PROJECT
+  TASK
+  CHECKLIST_ITEM
+}
+
+enum ReminderType {
+  ONE_TIME
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum ReminderChannel {
+  IN_APP
+  EMAIL
+  WHATSAPP
+  PUSH
+  BROWSER_PUSH
+}
+
+enum OccurrenceStatus {
+  PENDING
+  PROCESSING
+  SENT
+  SNOOZED
+  CANCELLED
+  FAILED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
+enum EmailProvider {
+  OUTLOOK
+  GMAIL
+}
+
+enum EmailThreadSource {
+  MANUAL
+  IMPORTED_FILE
+  CONNECTED_ACCOUNT
+}
+
+// ---------- Core identity ----------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  timezone     String   @default("UTC")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedProjects    Project[]          @relation("ProjectOwner")
+  projectMembers   ProjectMember[]
+  assignedTasks    Task[]             @relation("TaskAssignee")
+  tags             Tag[]
+  checklistTemplates ChecklistTemplate[]
+  reminders        Reminder[]
+  deviceTokens     DeviceToken[]
+  pushSubscriptions PushSubscription[]
+  emailConnections EmailConnection[]
+  activityLogs     ActivityLog[]
+}
+
+// ---------- Projects ----------
+
+model Project {
+  id              String        @id @default(uuid())
+  ownerId         String
+  owner           User          @relation("ProjectOwner", fields: [ownerId], references: [id])
+  name            String
+  description     String?
+  startDate       DateTime
+  targetEndDate   DateTime?
+  actualEndDate   DateTime?
+  status          ProjectStatus @default(NOT_STARTED)
+  priority        Priority      @default(MEDIUM)
+  color           String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  members      ProjectMember[]
+  tasks        Task[]
+  tags         ProjectTag[]
+  emailThreads EmailThread[]
+  attachments  Attachment[]
+  activityLogs ActivityLog[]
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+model ProjectMember {
+  id        String            @id @default(uuid())
+  projectId String
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  role      ProjectMemberRole @default(MEMBER)
+  createdAt DateTime          @default(now())
+
+  @@unique([projectId, userId])
+}
+
+// ---------- Tasks & Checklists ----------
+
+model Task {
+  id            String     @id @default(uuid())
+  projectId     String
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  status        TaskStatus @default(TODO)
+  priority      Priority   @default(MEDIUM)
+  startDate     DateTime?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  assignedUserId String?
+  assignedUser  User?      @relation("TaskAssignee", fields: [assignedUserId], references: [id])
+  orderIndex    Int        @default(0)
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  checklistItems ChecklistItem[]
+  tags           TaskTag[]
+  attachments    Attachment[]
+  activityLogs   ActivityLog[]
+
+  @@index([projectId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model ChecklistItem {
+  id          String          @id @default(uuid())
+  taskId      String
+  task        Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  parentId    String?
+  parent      ChecklistItem?  @relation("ChecklistNesting", fields: [parentId], references: [id])
+  children    ChecklistItem[] @relation("ChecklistNesting")
+  title       String
+  description String?
+  status      ChecklistStatus @default(PENDING)
+  priority    Priority        @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  orderIndex  Int             @default(0)
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tags        ChecklistItemTag[]
+  attachments Attachment[]
+
+  @@index([taskId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model ChecklistTemplate {
+  id          String   @id @default(uuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  items ChecklistTemplateItem[]
+}
+
+model ChecklistTemplateItem {
+  id              String            @id @default(uuid())
+  templateId      String
+  template        ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  orderIndex      Int               @default(0)
+  defaultPriority Priority          @default(MEDIUM)
+}
+
+// ---------- Tags ----------
+
+model Tag {
+  id      String  @id @default(uuid())
+  ownerId String
+  owner   User    @relation(fields: [ownerId], references: [id])
+  name    String
+  color   String?
+
+  projects ProjectTag[]
+  tasks    TaskTag[]
+  checklistItems ChecklistItemTag[]
+
+  @@unique([ownerId, name])
+}
+
+model ProjectTag {
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, tagId])
+}
+
+model TaskTag {
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tagId  String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}
+
+model ChecklistItemTag {
+  checklistItemId String
+  checklistItem   ChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  tagId           String
+  tag             Tag           @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([checklistItemId, tagId])
+}
+
+// ---------- Reminder Engine ----------
+// Definition (the rule) -> Occurrence (one concrete due-at instance) -> Outbox (one
+// queued send attempt per channel) -> Delivery log (what actually happened).
+// This separation is what lets snooze/recurrence/retry work without ever duplicating
+// or losing a reminder. See docs/REMINDER_ENGINE.md.
+
+model Reminder {
+  id                     String             @id @default(uuid())
+  userId                 String
+  user                   User               @relation(fields: [userId], references: [id])
+  entityType             ReminderEntityType
+  entityId               String
+  type                   ReminderType
+  scheduledAt            DateTime?          // for ONE_TIME
+  recurrenceRule         String?            // RRULE-style string for DAILY/WEEKLY/MONTHLY/CUSTOM
+  offsetBeforeDueMinutes Int?               // e.g. remind 60 min before the entity's own due date
+  channels               ReminderChannel[]
+  isActive               Boolean            @default(true)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  occurrences ReminderOccurrence[]
+
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+model ReminderOccurrence {
+  id             String           @id @default(uuid())
+  reminderId     String
+  reminder       Reminder         @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  nextFireAt     DateTime         // the effective UTC instant this occurrence must fire
+  status         OccurrenceStatus @default(PENDING)
+  attemptCount   Int              @default(0)
+  lockedBy       String?          // worker instance id, for safe concurrent claiming
+  lockedAt       DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  snoozeHistory SnoozeHistory[]
+  outboxEntries NotificationOutbox[]
+
+  @@index([status, nextFireAt])
+  @@index([reminderId])
+}
+
+model SnoozeHistory {
+  id               String             @id @default(uuid())
+  occurrenceId     String
+  occurrence       ReminderOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  previousFireAt   DateTime
+  newFireAt        DateTime
+  snoozeOptionLabel String
+  snoozedAt        DateTime           @default(now())
+}
+
+// ---------- Notifications ----------
+
+model NotificationOutbox {
+  id             String              @id @default(uuid())
+  occurrenceId   String
+  occurrence     ReminderOccurrence  @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  channel        ReminderChannel
+  payload        Json
+  idempotencyKey String              @unique
+  status         NotificationStatus  @default(PENDING)
+  createdAt      DateTime            @default(now())
+  processedAt    DateTime?
+
+  deliveries NotificationDelivery[]
+
+  @@index([status])
+}
+
+model NotificationDelivery {
+  id               String              @id @default(uuid())
+  outboxId         String
+  outbox           NotificationOutbox  @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+  channel          ReminderChannel
+  status           NotificationStatus
+  providerResponse Json?
+  error            String?
+  attemptedAt      DateTime            @default(now())
+}
+
+model DeviceToken {
+  id         String         @id @default(uuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   DevicePlatform
+  token      String         @unique
+  createdAt  DateTime       @default(now())
+  lastSeenAt DateTime       @default(now())
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  keys      Json
+  createdAt DateTime @default(now())
+}
+
+// ---------- Email & Threads ----------
+
+model EmailConnection {
+  id                   String         @id @default(uuid())
+  userId               String
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider             EmailProvider
+  accountEmail         String
+  accessTokenEncrypted String?
+  refreshTokenEncrypted String?
+  scope                String?
+  status               String         @default("NOT_CONNECTED")
+  connectedAt          DateTime?
+  createdAt            DateTime       @default(now())
+}
+
+model EmailThread {
+  id             String            @id @default(uuid())
+  projectId      String
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subject        String
+  conversationId String?
+  externalUrl    String?
+  source         EmailThreadSource @default(MANUAL)
+  notes          String?
+  createdAt      DateTime          @default(now())
+
+  messages EmailMessage[]
+
+  @@index([projectId])
+}
+
+model EmailMessage {
+  id          String      @id @default(uuid())
+  threadId    String
+  thread      EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  messageId   String?
+  fromAddress String?
+  toAddresses Json?
+  ccAddresses Json?
+  subject     String?
+  bodyHtml    String?
+  bodyText    String?
+  sentAt      DateTime?
+  createdAt   DateTime    @default(now())
+
+  attachments Attachment[]
+}
+
+// ---------- Attachments & Activity ----------
+
+model Attachment {
+  id              String        @id @default(uuid())
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  storagePath     String
+  projectId       String?
+  project         Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId          String?
+  task            Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  checklistItemId String?
+  checklistItem   ChecklistItem? @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+  emailMessageId  String?
+  emailMessage    EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([taskId])
+}
