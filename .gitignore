@@ -16,3 +16,4 @@ android/
 ios/
 .vscode/
 docker/volumes/
+.claude/scheduled_tasks.lock

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useRouter, type Href } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 
 import type { NotificationData } from '@/lib/notifications';
 
@@ -16,6 +17,11 @@ export function useNotificationRouter() {
   const router = useRouter();
 
   useEffect(() => {
+    // expo-notifications' response-tracking APIs aren't implemented on web (they throw
+    // "not supported on web" synchronously, crashing the whole app on mount) — skip
+    // entirely there, same guard convention as src/lib/notifications.ts.
+    if (Platform.OS === 'web') return;
+
     // Cold start: app was launched by tapping a notification.
     Notifications.getLastNotificationResponseAsync().then((response) => {
       const data = response?.notification.request.content.data as NotificationData | undefined;

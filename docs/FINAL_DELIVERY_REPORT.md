@@ -98,9 +98,22 @@ committed.
 
 ## 3. Implemented but not verified by me
 
-- **Mobile app** (Expo/React Native): typechecks clean, `expo-doctor` 20/20, and
-  `expo start --web` bundled every route with 0 errors — but I did not run it on an
-  actual device or emulator, and did not click through its screens.
+- **Mobile app** (Expo/React Native) — update: actually run and clicked through in a
+  browser (`expo start --web`) after this report was first written. Two more real bugs
+  surfaced only by doing that, both fixed:
+  - The `(auth)` route group had no `index.tsx`, so landing on it directly (the normal
+    signed-out redirect target) showed "Unmatched Route" instead of the login screen.
+    Added `src/app/(auth)/index.tsx` redirecting to `/(auth)/login`.
+  - `useNotificationRouter` called `Notifications.getLastNotificationResponseAsync()`
+    unconditionally on mount; that API throws "not supported on web" on the web
+    platform, crashing the entire app behind an error overlay before anything could
+    render. Guarded it with `Platform.OS === 'web'` (same convention already used in
+    `src/lib/notifications.ts`).
+  
+  After both fixes: logged in as the seeded dev user and confirmed the "Today" (My
+  Day) screen renders real live data from the same backend (active project count,
+  due-today task). Still not run on an actual iOS/Android device or emulator — only
+  the web preview.
 - **Web UI beyond the two pages above**: My Day, Calendar, Reminders UI, checklist
   drag-and-drop, template application, tag picker, email-thread linking UI — these
   exist in code and passed `npm run build`/`lint`, but I did not click through them
