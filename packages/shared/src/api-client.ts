@@ -1,6 +1,7 @@
 import type {
   Project, Task, ChecklistItem, ChecklistTemplate, Reminder, ReminderOccurrence,
   DashboardSummary, MyDay, PaginatedResult, User, EmailThread, EmailMessage,
+  Tag, ActivityEntry, AppNotification, DevicePlatform,
 } from "./types";
 
 export interface ApiClientOptions {
@@ -55,6 +56,17 @@ export class ApiClient {
   me() {
     return this.request<User>("/auth/me");
   }
+  // ADDED (apps/web, 2026-11-07): documented in docs/API_DESIGN.md ("POST /auth/refresh"
+  // / "POST /auth/logout") but had no ApiClient methods. Needed so the web app can give
+  // up gracefully on 401 / let the user explicitly sign out; response shape for refresh
+  // is a guess (`{ accessToken }`) consistent with login/register, not verified against
+  // a running apps/api yet.
+  refresh() {
+    return this.request<{ accessToken: string }>("/auth/refresh", { method: "POST" });
+  }
+  logout() {
+    return this.request<void>("/auth/logout", { method: "POST" });
+  }
 
   // Dashboard
   dashboardSummary() {
@@ -78,8 +90,16 @@ export class ApiClient {
   updateProject(id: string, data: unknown) {
     return this.request<Project>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) });
   }
-  deleteProject(id: string) {
-    return this.request<void>(`/projects/${id}`, { method: "DELETE" });
+  // `force` param ADDED (apps/web, 2026-11-07): docs/API_DESIGN.md says delete is
+  // "blocked if it has tasks unless ?force=true" — optional, backward-compatible.
+  deleteProject(id: string, force?: boolean) {
+    return this.request<void>(`/projects/${id}${force ? "?force=true" : ""}`, { method: "DELETE" });
+  }
+  // ADDED (apps/web, 2026-11-07): "GET /projects/:id/activity" is documented in
+  // docs/API_DESIGN.md and required for the project detail activity history, but had
+  // no ApiClient method.
+  getProjectActivity(id: string) {
+    return this.request<ActivityEntry[]>(`/projects/${id}/activity`);
   }
 
   // Tasks
@@ -90,6 +110,13 @@ export class ApiClient {
   createTask(projectId: string, data: unknown) {
     return this.request<Task>(`/projects/${projectId}/tasks`, { method: "POST", body: JSON.stringify(data) });
   }
+  // ADDED (apps/mobile, 2026-11-07): "GET /tasks/:id" is documented in
+  // docs/API_DESIGN.md but had no single-entity ApiClient method. The mobile app needs
+  // it to resolve a `projectflow://task/:id` deep link / notification tap into a task
+  // detail screen without first loading its parent project's whole task list.
+  getTask(id: string) {
+    return this.request<Task>(`/tasks/${id}`);
+  }
   updateTask(id: string, data: unknown) {
     return this.request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(data) });
   }
@@ -98,6 +125,12 @@ export class ApiClient {
   }
   bulkCompleteTasks(taskIds: string[]) {
     return this.request<void>("/tasks/bulk-complete", { method: "POST", body: JSON.stringify({ taskIds }) });
+  }
+  // ADDED (apps/web, 2026-11-07): "POST /tasks/reorder — { taskId, newIndex }[]" is
+  // documented in docs/API_DESIGN.md (needed for task drag-and-drop) but had no
+  // ApiClient method.
+  reorderTasks(items: { taskId: string; newIndex: number }[]) {
+    return this.request<void>("/tasks/reorder", { method: "POST", body: JSON.stringify(items) });
   }
 
   // Checklist items
@@ -115,6 +148,17 @@ export class ApiClient {
   }
   deleteChecklistItem(id: string) {
     return this.request<void>(`/checklist-items/${id}`, { method: "DELETE" });
+  }
+  // ADDED (apps/web, 2026-11-07): "POST /checklist-items/reorder" and
+  // "POST /checklist-items/bulk-complete" are documented in docs/API_DESIGN.md (needed
+  // for checklist drag-and-drop and bulk-complete) but had no ApiClient methods. The
+  // reorder payload shape (`{ id, newIndex }[]`) is a guess mirroring `reorderTasks`,
+  // not verified against a running apps/api yet.
+  reorderChecklistItems(items: { id: string; newIndex: number }[]) {
+    return this.request<void>("/checklist-items/reorder", { method: "POST", body: JSON.stringify(items) });
+  }
+  bulkCompleteChecklistItems(ids: string[]) {
+    return this.request<void>("/checklist-items/bulk-complete", { method: "POST", body: JSON.stringify({ ids }) });
   }
 
   // Templates
@@ -155,6 +199,18 @@ export class ApiClient {
     return this.request<ReminderOccurrence>(`/occurrences/${id}/complete`, { method: "POST" });
   }
 
+  // ADDED (apps/web, 2026-11-07): "GET /tags" / "POST /tags" are documented in
+  // docs/API_DESIGN.md and `tagIds` already exists on CreateProjectInput /
+  // UpdateProjectInput, but no ApiClient methods existed to list/create tags for the
+  // project tag picker. PATCH/DELETE intentionally not added — not needed by apps/web yet.
+  // Tags
+  listTags() {
+    return this.request<Tag[]>("/tags");
+  }
+  createTag(data: { name: string; color?: string }) {
+    return this.request<Tag>("/tags", { method: "POST", body: JSON.stringify(data) });
+  }
+
   // Email threads
   listEmailThreads(projectId: string) {
     return this.request<EmailThread[]>(`/projects/${projectId}/email-threads`);
@@ -164,5 +220,25 @@ export class ApiClient {
   }
   listEmailMessages(threadId: string) {
     return this.request<EmailMessage[]>(`/email-threads/${threadId}/messages`);
+  }
+
+  // ADDED (apps/mobile, 2026-11-07): "POST /devices/register" and the "/notifications"
+  // endpoints are documented in docs/API_DESIGN.md but had no wire types or ApiClient
+  // methods. Needed by the mobile app to register for push (device token hand-off to
+  // the backend's notification channels — see apps/mobile's README for what this does
+  // and does not guarantee) and to power the Notifications tab. Response shapes are a
+  // best-effort guess consistent with the rest of this file (plain arrays for list
+  // endpoints, `void` for actions), not verified against a running apps/api yet.
+  registerDevice(platform: DevicePlatform, token: string) {
+    return this.request<void>("/devices/register", { method: "POST", body: JSON.stringify({ platform, token }) });
+  }
+  listNotifications(unreadOnly?: boolean) {
+    return this.request<AppNotification[]>(`/notifications${unreadOnly ? "?unread=true" : ""}`);
+  }
+  markNotificationRead(id: string) {
+    return this.request<void>(`/notifications/${id}/read`, { method: "POST" });
+  }
+  markAllNotificationsRead() {
+    return this.request<void>("/notifications/read-all", { method: "POST" });
   }
 }

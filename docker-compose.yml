@@ -1,0 +1,141 @@
+# ProjectFlow local stack.
+#
+# Prerequisite: copy .env.example to .env in the repo root and fill in real values.
+# `.env` is gitignored and must NEVER be committed — see infrastructure/README.md.
+#
+#   cp .env.example .env
+#   docker compose up --build
+#
+# Services: postgres, api, worker (same image as api, different command), web.
+# All four share the `projectflow-net` network.
+
+networks:
+  projectflow-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  api_storage:
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Published to the host for local `psql`/GUI-client convenience during
+    # development. Trade-off: this opens the DB port on the host's network
+    # interfaces to anything that can reach this machine, not just the other
+    # containers (which already reach postgres over `projectflow-net` without this
+    # being published at all). Acceptable for a single-developer local machine;
+    # remove this `ports:` block before this compose file is ever reused against a
+    # shared or internet-facing host.
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - projectflow-net
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: projectflow-api:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # .env.example's DATABASE_URL uses `localhost`, which is correct for a process
+      # running directly on the host (e.g. `npm run dev`) talking to Postgres via the
+      # published port above, but WRONG inside this compose network, where
+      # containers must reach Postgres by its service name. Same variable name as
+      # .env.example (DATABASE_URL) and the same POSTGRES_* names — nothing new
+      # invented, just re-pointed at the in-network host for this service only.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # Applies pending Prisma migrations, then starts the API. Runs on every
+    # container start; `prisma migrate deploy` is a no-op when there is nothing new
+    # to apply, so this is safe to repeat.
+    command: sh -c "/repo/node_modules/.bin/prisma migrate deploy && node dist/server.js"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - api_storage:/repo/apps/api/storage
+    ports:
+      - "4000:4000"
+    networks:
+      - projectflow-net
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: projectflow-api:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: node dist/worker-entry.js
+    # The worker talks to Postgres directly (scheduler + notification dispatcher,
+    # see docs/ARCHITECTURE.md) and never calls the api process over HTTP, so it
+    # only needs to wait on postgres, not on api. It deliberately does NOT also run
+    # `prisma migrate deploy` — the `api` service already owns applying migrations
+    # on startup, so they run exactly once per `docker compose up`, not twice.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - api_storage:/repo/apps/api/storage
+    # This image's baked-in HEALTHCHECK (from apps/api/Dockerfile) probes GET
+    # /health on port 4000 — that's the API process's endpoint. The worker process
+    # never listens on a port, so that probe would always fail here. Disable it for
+    # this service instead of letting Docker permanently report the worker as
+    # unhealthy.
+    healthcheck:
+      disable: true
+    networks:
+      - projectflow-net
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are inlined into the browser bundle at image BUILD
+        # time, not read again when the container starts — rebuild (`docker compose
+        # build web`), not just restart, after changing this in .env.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+    image: projectflow-web:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # The root .env's PORT=4000 is the API's port; env_file above would otherwise
+      # make Next.js inherit that same value and bind to 4000 instead of 3000 inside
+      # this container, leaving nothing listening on the published 3000 mapping.
+      # Found by actually running this stack: the web container reported "unhealthy"
+      # and its own logs showed "next start" listening on :4000, not :3000.
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    # Published on 3001, not 3000: found by actually running this stack that this
+    # machine already has an unrelated app listening on host port 3000, which made
+    # the browser connect to that other app instead of ours. Container-internal port
+    # stays 3000 (PORT=3000 above) — only the host-side mapping changes.
+    ports:
+      - "3001:3000"
+    networks:
+      - projectflow-net

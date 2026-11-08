@@ -1,0 +1,38 @@
+# Local development overrides.
+#
+# `docker compose` merges this file on top of docker-compose.yml automatically
+# whenever it's named exactly `docker-compose.override.yml` and sits next to it — no
+# extra flag needed. To run the "prod-like" stack without these overrides:
+#   docker compose -f docker-compose.yml up --build
+#
+# Kept deliberately minimal for now: just a foreground-friendly restart policy so
+# `docker compose up` + Ctrl+C behaves like a normal dev session instead of Docker
+# auto-restarting a crashed container while you're actively iterating.
+#
+# NOT included yet: bind-mounted source + a `tsx watch`/`next dev`-driven hot-reload
+# loop for apps/api and apps/web (running their real `dev`/`dev:worker` scripts — now
+# confirmed to exist in apps/api/package.json and apps/web/package.json — against the
+# repo mounted in, instead of rebuilding the image per change). That's the natural
+# next step for this file. Deliberately deferred for now because it can't be
+# verified end-to-end in this pass (Docker Desktop's daemon was not reachable the
+# whole time this was written — see infrastructure/README.md / the task report), and
+# a bind-mount + `target: builder` + anonymous-volume node_modules setup is easy to
+# get subtly wrong in ways that only show up at `docker compose up` time. Shipping it
+# untested would be worse than not shipping it. When adding it: build target
+# `builder` (already has node_modules + a baked prisma generate/build), bind-mount
+# each app's `src/` (and apps/api's `prisma/`) over the image's copy, override
+# `command:` to run the real `dev`/`dev:worker` script, and actually run
+# `docker compose up` once to confirm hot reload really works before trusting it.
+
+services:
+  postgres:
+    restart: "no"
+
+  api:
+    restart: "no"
+
+  worker:
+    restart: "no"
+
+  web:
+    restart: "no"

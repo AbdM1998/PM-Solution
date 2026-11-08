@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build, typecheck, test
+    runs-on: ubuntu-latest
+
+    # Disposable Postgres for apps/api's integration tests. Credentials here are
+    # throwaway CI-only values, not secrets — this database exists only for the
+    # lifetime of the job.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: projectflow_ci
+          POSTGRES_PASSWORD: projectflow_ci
+          POSTGRES_DB: projectflow_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U projectflow_ci -d projectflow_ci"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://projectflow_ci:projectflow_ci@localhost:5432/projectflow_ci
+      NODE_ENV: test
+      # Dummy, clearly-fake values, not real secrets - only exist so apps/api's
+      # config/env validation doesn't fail on missing vars in CI. Never used outside
+      # this job.
+      JWT_SECRET: ci-test-secret-not-for-production
+      JWT_ACCESS_TTL: 15m
+      REFRESH_TOKEN_TTL: 30d
+      WEB_ORIGIN: http://localhost:3000
+      MOBILE_ORIGIN: http://localhost:19006
+      STORAGE_ROOT: ./storage
+      # 32 zero-ish bytes, base64-encoded - matches the format .env.example asks for,
+      # not a real key.
+      ENCRYPTION_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000/api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.16.0"
+          cache: "npm"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build packages/shared
+        run: npm run build --workspace packages/shared
+
+      - name: Typecheck + build apps/api
+        # apps/api's documented scripts are build/start/start:worker/dev/test (see
+        # task brief) - no separate `typecheck` script, so `build` (tsc) is what
+        # both typechecks and compiles.
+        run: npm run build --workspace apps/api
+
+      - name: Apply database migrations (apps/api test DB)
+        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+
+      - name: Test apps/api
+        run: npm test --workspace apps/api
+
+      - name: Build apps/web
+        run: npm run build --workspace apps/web
+
+      - name: Lint apps/mobile (no emulator in CI)
+        run: npm run lint --workspace apps/mobile
+
+      - name: Typecheck apps/mobile (no emulator in CI)
+        # apps/mobile/package.json has no "typecheck" script (confirmed by reading
+        # the real file) - apps/mobile/AGENTS.md documents `npx tsc --noEmit` as the
+        # typecheck command, so use that directly rather than a script name that
+        # doesn't exist.
+        run: npx tsc --noEmit -p apps/mobile/tsconfig.json

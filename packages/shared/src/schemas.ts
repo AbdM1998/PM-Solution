@@ -98,3 +98,22 @@ export const CreateEmailThreadInput = z.object({
   externalUrl: z.string().url().optional(),
   notes: z.string().max(2000).optional(),
 });
+
+// Inferred TS types for every input schema above, added by the API team (apps/api)
+// because this file previously exported only the runtime Zod schemas (needed for
+// validation middleware) with no corresponding TS types (needed for service-layer
+// function signatures). A `const X = z.object(...)` value and a `type X = z.infer<...>`
+// type of the same name coexist in TS (value-space vs type-space), so this is purely
+// additive — no existing export is renamed or removed.
+export type RegisterInput = z.infer<typeof RegisterInput>;
+export type LoginInput = z.infer<typeof LoginInput>;
+export type CreateProjectInput = z.infer<typeof CreateProjectInput>;
+export type UpdateProjectInput = z.infer<typeof UpdateProjectInput>;
+export type CreateTaskInput = z.infer<typeof CreateTaskInput>;
+export type UpdateTaskInput = z.infer<typeof UpdateTaskInput>;
+export type CreateChecklistItemInput = z.infer<typeof CreateChecklistItemInput>;
+export type UpdateChecklistItemInput = z.infer<typeof UpdateChecklistItemInput>;
+export type CreateReminderInput = z.infer<typeof CreateReminderInput>;
+export type SnoozeOccurrenceInput = z.infer<typeof SnoozeOccurrenceInput>;
+export type CreateChecklistTemplateInput = z.infer<typeof CreateChecklistTemplateInput>;
+export type CreateEmailThreadInput = z.infer<typeof CreateEmailThreadInput>;

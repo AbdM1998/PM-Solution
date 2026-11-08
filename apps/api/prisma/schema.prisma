@@ -3,7 +3,8 @@
 // the reasoning behind the Reminder / Occurrence / Notification split.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -352,10 +353,25 @@ model NotificationOutbox {
   status         NotificationStatus  @default(PENDING)
   createdAt      DateTime            @default(now())
   processedAt    DateTime?
+  // Added by the API team (not in the original schema): the in-app notification feed
+  // (`GET /notifications?unread=true`) needs read/unread state and there is no other
+  // table for it — IN_APP-channel outbox rows double as the notification inbox, so a
+  // single nullable "read marker" field is the minimal addition. Unused by non-IN_APP
+  // channels. See docs/DATABASE_DESIGN.md note in FINAL delivery report for rationale.
+  readAt         DateTime?
 
   deliveries NotificationDelivery[]
 
   @@index([status])
+}
+
+// Added by the API team: docs/API_DESIGN.md requires `GET /health` to report "worker
+// heartbeat age", but the original schema had no persistence for that (the API and
+// worker are separate processes/containers and cannot share in-memory state). This is
+// a single-row table the worker upserts every tick; no existing table/field touched.
+model WorkerHeartbeat {
+  id         Int      @id @default(1)
+  lastTickAt DateTime @default(now())
 }
 
 model NotificationDelivery {

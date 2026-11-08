@@ -1,0 +1,34 @@
+# Keeps the Docker build context small and avoids leaking local/dev-only state into
+# images. Build context for apps/api and apps/web is the REPO ROOT (see their
+# Dockerfiles' header comments for why), so this applies repo-wide.
+
+**/node_modules
+**/dist
+**/.next
+**/.expo
+**/.expo-shared
+**/coverage
+**/*.tsbuildinfo
+**/.turbo
+
+.git
+.github
+
+# Never bake real secrets into an image layer.
+.env
+.env.*.local
+
+*.log
+.DS_Store
+
+# Not needed inside any image build.
+docs
+infrastructure
+android
+ios
+
+# apps/mobile/package.json IS needed (both Dockerfiles copy every workspace's
+# manifest so `npm ci` hoists dependencies the same way it does at the repo root —
+# see the comment in apps/api/Dockerfile) — so apps/mobile itself is deliberately
+# NOT excluded here, just its node_modules (already covered above) and native
+# build output (android/ios, already covered above).

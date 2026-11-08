@@ -42,6 +42,21 @@ export interface Project {
   completedTaskCount: number;
   pendingTaskCount: number;
   overdueTaskCount: number;
+  // ADDED (apps/web, 2026-11-07): resolved tag objects for display, additive and
+  // optional — the write path already accepted `tagIds` in CreateProjectInput /
+  // UpdateProjectInput, but no field existed to read them back. See Tag below.
+  tags?: Tag[];
+}
+
+// ADDED (apps/web, 2026-11-07): Tag CRUD is documented in docs/API_DESIGN.md and
+// `tagIds` already exists on CreateProjectInput/UpdateProjectInput in schemas.ts, but
+// no Tag type or ApiClient methods existed yet. Shape matches apps/api/prisma/schema.prisma
+// `model Tag` (id, ownerId, name, color).
+export interface Tag {
+  id: string;
+  ownerId: string;
+  name: string;
+  color?: string | null;
 }
 
 export interface Task {
@@ -109,6 +124,21 @@ export interface ReminderOccurrence {
   projectName: string;
 }
 
+// ADDED (apps/web, 2026-11-07): `GET /projects/:id/activity` is documented in
+// docs/API_DESIGN.md and required by the project detail page's activity history, but
+// had no ApiClient method or return type. Shape matches `model ActivityLog` in
+// apps/api/prisma/schema.prisma; superset of the inline shape used by
+// `DashboardSummary.recentActivity` (which is left untouched).
+export interface ActivityEntry {
+  id: string;
+  projectId?: string | null;
+  taskId?: string | null;
+  userId: string;
+  action: string;
+  metadata?: unknown;
+  createdAt: string;
+}
+
 export interface DashboardSummary {
   totalProjects: number;
   activeProjects: number;
@@ -154,6 +184,27 @@ export interface EmailThread {
   source: "MANUAL" | "IMPORTED_FILE" | "CONNECTED_ACCOUNT";
   notes?: string | null;
   createdAt: string;
+}
+
+// ADDED (apps/mobile, 2026-11-07): `POST /devices/register` and the `/notifications`
+// endpoints are documented in docs/API_DESIGN.md but had no wire types/ApiClient methods
+// yet. The mobile app needs both for expo-notifications device registration and the
+// Notifications tab. Added here so apps/web can read the same shape later.
+export type DevicePlatform = "IOS" | "ANDROID" | "WEB";
+
+// Named `AppNotification` (not `Notification`) to avoid colliding with the DOM
+// `Notification` type that's globally available in web/browser TS environments.
+export interface AppNotification {
+  id: string;
+  title: string;
+  body?: string | null;
+  isRead: boolean;
+  createdAt: string;
+  // denormalized context for list rendering, same convention as ReminderOccurrence above
+  entityType?: ReminderEntityType | null;
+  entityId?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
 }
 
 export interface EmailMessage {
