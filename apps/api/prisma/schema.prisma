@@ -1,6 +1,13 @@
-// ProjectFlow — Prisma schema (PostgreSQL)
-// Source of truth for the data model. See docs/DATABASE_DESIGN.md for the ERD and
-// the reasoning behind the Reminder / Occurrence / Notification split.
+// ProjectFlow — Prisma schema (PostgreSQL). Source of truth for the data model — see
+// docs/DATABASE_DESIGN.md for the ERD and the reasoning behind the Reminder /
+// Occurrence / Notification split.
+//
+// prisma/schema.sqlite.prisma is a second, SQLite-backed variant of this exact same
+// model, used only by the local/offline deployment (see local/README.md) for a
+// single non-technical user with no internet connection and nothing to install.
+// Any model/field/index/relation change here must be mirrored there too — the two
+// files should stay byte-identical except for the generator/datasource block at the
+// top of each.
 
 generator client {
   provider      = "prisma-client-js"
@@ -300,8 +307,24 @@ model Reminder {
   scheduledAt            DateTime?          // for ONE_TIME
   recurrenceRule         String?            // RRULE-style string for DAILY/WEEKLY/MONTHLY/CUSTOM
   offsetBeforeDueMinutes Int?               // e.g. remind 60 min before the entity's own due date
-  channels               ReminderChannel[]
+  // JSON-encoded ReminderChannel[] (e.g. '["IN_APP","EMAIL"]'), not a native array
+  // column. Postgres supports native scalar arrays but SQLite does not — the local,
+  // no-internet deployment mode (prisma/schema.sqlite.prisma) uses the exact same
+  // model definitions as this file, differing only in the datasource block, which
+  // only works because every field here is a type SQLite also supports. See
+  // src/lib/reminderChannels.ts for the serialize/parse helpers used everywhere this
+  // field is read or written, so application code never deals with the JSON string
+  // directly.
+  channels               String
   isActive               Boolean            @default(true)
+  // Optional per-reminder override of where an EMAIL/WHATSAPP delivery goes, instead
+  // of always using the owning user's own account email. Null means "use the
+  // account's own contact info" (EMAIL) or "no destination configured" (WHATSAPP —
+  // there is no account-level phone number to fall back to). See
+  // src/worker/scheduler.ts (payload construction) and the EMAIL/WHATSAPP channel
+  // adapters for where these are actually consumed.
+  targetEmail            String?
+  targetWhatsappNumber   String?
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 

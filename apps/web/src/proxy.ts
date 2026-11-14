@@ -31,5 +31,15 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)).*)"],
+  // "api" excluded: those requests are proxied straight through to the backend (see
+  // next.config.js rewrites()) and must never be redirected to the login PAGE — the
+  // backend itself enforces auth on every request, per the comment above. This only
+  // started mattering once NEXT_PUBLIC_API_BASE_URL became a same-origin "/api" path
+  // (previously the browser called the backend's own absolute origin directly, so
+  // these requests never reached this middleware at all).
+  // manifest.json / sw.js also excluded: PWA installability requires the browser
+  // (and, on Android, Chrome's own installability checker) to fetch these
+  // unauthenticated — found by actually loading the manifest and getting redirected
+  // to /login instead, exactly the same class of bug as the "api" exclusion above.
+  matcher: ["/((?!_next|api|manifest\\.json|sw\\.js|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)).*)"],
 };

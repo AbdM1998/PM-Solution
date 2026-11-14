@@ -12,6 +12,7 @@ import { computeNextRecurrence, RECURRING_TYPES } from "../modules/reminders/ser
 import { resolveEntityContext } from "../lib/access";
 import { hoursBetween } from "../lib/timezone";
 import type { OutboxPayload } from "./channels/types";
+import { decodeChannels } from "../lib/reminderChannels";
 
 export const WORKER_ID = `worker-${process.pid}-${randomUUID().slice(0, 8)}`;
 
@@ -89,6 +90,8 @@ export async function processOneOccurrence(occurrence: ReminderOccurrence, now: 
     userId: user.id,
     userEmail: user.email,
     userName: user.name,
+    targetEmail: reminder.targetEmail ?? user.email,
+    targetWhatsappNumber: reminder.targetWhatsappNumber,
     entityType: reminder.entityType,
     entityId: reminder.entityId,
     entityTitle: ctx.title,
@@ -109,7 +112,7 @@ export async function processOneOccurrence(occurrence: ReminderOccurrence, now: 
     // JS. This is what makes the no-double-send guarantee survive reprocessing
     // cleanly instead of only on the first attempt.
     await tx.notificationOutbox.createMany({
-      data: reminder.channels.map((channel) => ({
+      data: decodeChannels(reminder.channels).map((channel) => ({
         occurrenceId: occurrence.id,
         channel,
         payload: payload as unknown as Prisma.InputJsonValue,

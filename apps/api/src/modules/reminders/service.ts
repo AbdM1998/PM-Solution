@@ -11,6 +11,7 @@ import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/error-handler";
 import { assertEntityAccess, resolveEntityContext } from "../../lib/access";
 import { computeNextRecurrence, computeSnoozeFireAt } from "../../lib/timezone";
+import { encodeChannels, decodeChannels } from "../../lib/reminderChannels";
 
 type Tx = Prisma.TransactionClient;
 
@@ -51,22 +52,25 @@ export async function createReminder(userId: string, input: CreateReminderInput)
       scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
       recurrenceRule: input.recurrenceRule ?? null,
       offsetBeforeDueMinutes: input.offsetBeforeDueMinutes ?? null,
-      channels: input.channels,
+      channels: encodeChannels(input.channels),
+      targetEmail: input.targetEmail ?? null,
+      targetWhatsappNumber: input.targetWhatsappNumber ?? null,
       occurrences: {
         create: [{ nextFireAt, status: "PENDING" }],
       },
     },
     include: { occurrences: true },
   });
-  return reminder;
+  return { ...reminder, channels: decodeChannels(reminder.channels) };
 }
 
 export async function listReminders(userId: string, entityType: ReminderEntityType, entityId: string) {
   await assertEntityAccess(userId, entityType, entityId);
-  return prisma.reminder.findMany({
+  const reminders = await prisma.reminder.findMany({
     where: { entityType, entityId, userId },
     orderBy: { createdAt: "desc" },
   });
+  return reminders.map((r) => ({ ...r, channels: decodeChannels(r.channels) }));
 }
 
 async function getOwnedReminder(userId: string, reminderId: string) {
@@ -105,7 +109,7 @@ export async function updateReminder(
         scheduledAt: nextScheduledAt,
         recurrenceRule: nextRecurrenceRule,
         offsetBeforeDueMinutes: nextOffset,
-        channels: input.channels ?? reminder.channels,
+        channels: input.channels ? encodeChannels(input.channels) : reminder.channels,
         isActive: input.isActive ?? reminder.isActive,
       },
     });
@@ -123,7 +127,7 @@ export async function updateReminder(
     }
 
     return updated;
-  });
+  }).then((updated) => ({ ...updated, channels: decodeChannels(updated.channels) }));
 }
 
 /** DELETE /reminders/:id — soft delete: deactivates the rule and cancels future

@@ -25,6 +25,13 @@ export interface OutboxPayload {
   userId: string;
   userEmail: string;
   userName: string;
+  /** EMAIL delivery target: the reminder's own override, or the account's email when
+   * none was set. Always non-empty — see scheduler.ts's payload construction. */
+  targetEmail: string;
+  /** WHATSAPP delivery target. Null when the reminder has no override set — there is
+   * no account-level phone number to fall back to, so a WHATSAPP channel with no
+   * target is reported as simulated/no-op even when credentials are configured. */
+  targetWhatsappNumber: string | null;
   entityType: "PROJECT" | "TASK" | "CHECKLIST_ITEM";
   entityId: string;
   entityTitle: string;

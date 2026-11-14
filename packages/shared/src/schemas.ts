@@ -69,6 +69,11 @@ export const CreateReminderInput = z.object({
   recurrenceRule: z.string().optional(),
   offsetBeforeDueMinutes: z.number().int().positive().optional(),
   channels: z.array(ReminderChannelEnum).min(1),
+  // Optional per-reminder override of where EMAIL/WHATSAPP delivery goes, instead of
+  // always using the account's own email (WhatsApp has no account-level number to
+  // fall back to at all). Left out / undefined means "use the account default".
+  targetEmail: z.string().email().optional(),
+  targetWhatsappNumber: z.string().min(5).max(20).optional(),
 }).refine(
   (v) => (v.type === "ONE_TIME" ? !!v.scheduledAt || !!v.offsetBeforeDueMinutes : true),
   { message: "ONE_TIME reminders need scheduledAt or offsetBeforeDueMinutes" }

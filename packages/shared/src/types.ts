@@ -109,6 +109,10 @@ export interface Reminder {
   offsetBeforeDueMinutes?: number | null;
   channels: ReminderChannel[];
   isActive: boolean;
+  // Optional per-reminder override of where EMAIL/WHATSAPP delivery goes — see
+  // apps/api/src/worker/scheduler.ts and the EMAIL/WHATSAPP channel adapters.
+  targetEmail?: string | null;
+  targetWhatsappNumber?: string | null;
 }
 
 export interface ReminderOccurrence {

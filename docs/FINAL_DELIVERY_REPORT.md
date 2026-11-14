@@ -6,6 +6,62 @@ unverified** (code exists, builds, but I could not exercise it end-to-end), and
 **stubbed by design** (no fake success — the adapter exists and clearly reports it is
 not live).
 
+## 0. Local, fully offline deployment (added after initial delivery)
+
+A separate deployment mode exists for a single non-technical user with **no internet
+connection and nothing new to install**: [local/start.bat](../local/start.bat). It
+bundles:
+
+- Portable PostgreSQL 16.15 (official EDB binaries ZIP, no installer, no admin rights,
+  no Windows service registration)
+- Portable Node.js 24 (official ZIP, no installer)
+- The compiled API, worker, and Next.js web app (standalone output)
+
+Double-clicking `start.bat` initializes the local database on first run only, applies
+migrations, starts all three processes bound to `0.0.0.0`, and opens the browser —
+genuinely zero Docker and zero internet access required at runtime. It also prints the
+PC's real WiFi/Ethernet LAN IP so a phone on the same network can open the same app
+and see the same data.
+
+**Real bugs found and fixed while building this** (each confirmed by actually running
+the thing and watching it fail first):
+- The channels field on `Reminder` was a native Postgres array, which SQLite (briefly
+  considered as an alternative engine, then abandoned — see below) can't represent;
+  converted it to a JSON-encoded string column instead, with a migration that
+  preserves existing data rather than dropping it.
+- `Reminder.channels` being a Postgres array was never actually the blocker for this
+  deployment mode (Postgres itself runs fine portably) — the real reason to keep the
+  JSON-string conversion was to keep the schema change already made; the *actual*
+  path taken for "local/offline" is portable **Postgres**, not SQLite (see below).
+- Host port collisions with unrelated local apps/services (the same `localhost:3000`
+  app encountered earlier) — the launcher uses 5433/4100/3100, chosen to avoid every
+  port already in use on this machine.
+- The Next.js standalone server's real entry point is nested at `apps/web/server.js`
+  within the standalone output, not at the top level — the launcher pointed at the
+  wrong path until corrected.
+- **Next.js bakes `next.config.js`'s `rewrites()` destination into the build output at
+  build time** — setting `API_INTERNAL_URL` at runtime (the approach that works for
+  environment variables read inside request handlers) silently has no effect on the
+  routing manifest. Had to rebuild with the correct value set as a build-time env var.
+  `NEXT_PUBLIC_API_BASE_URL` has the same build-time-only behavior (it's inlined into
+  the client bundle).
+- `ipconfig`'s first non-loopback IPv4 address was a WSL virtual adapter
+  (`172.31.48.1`), not the real WiFi adapter a phone could actually reach — the
+  launcher now prefers a `192.168.x.x` address specifically.
+- The batch script's `timeout` command resolved to a Unix-coreutils `timeout` earlier
+  on PATH (from dev tooling) instead of Windows' own, which takes different flags —
+  replaced with a `ping`-based wait, which has no such ambiguity.
+
+**An earlier SQLite attempt was abandoned**: the installed Prisma version's SQLite
+connector doesn't support the `Json` column type or native `enum`s at all, which would
+have meant rewriting every enum field and every JSON field across the entire schema —
+far more invasive than switching deployment *packaging* while keeping Postgres as the
+database engine, which is what was actually shipped.
+
+**Not yet done**: the web/mobile UI forms still don't expose the per-reminder custom
+contact fields (`targetEmail`/`targetWhatsappNumber`) added earlier — only the API
+supports them so far.
+
 ## 1. What actually happened overnight
 
 The single biggest blocker was not the application code — it was **Docker Desktop

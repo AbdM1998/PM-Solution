@@ -16,9 +16,24 @@ export const whatsappChannel: ChannelAdapter = {
   async send(outbox: NotificationOutbox): Promise<ChannelSendResult> {
     const payload = outbox.payload as unknown as OutboxPayload;
 
+    // There is no account-level WhatsApp number to fall back to — unlike EMAIL, a
+    // reminder with no targetWhatsappNumber override has nowhere to send at all, so
+    // this is reported as simulated/no-op even when credentials ARE configured.
+    if (!payload.targetWhatsappNumber) {
+      logger.info("WhatsApp: no target number set on this reminder — no-op", {
+        reminderId: payload.reminderId,
+        title: payload.title,
+      });
+      return {
+        ok: true,
+        simulated: true,
+        providerResponse: { simulated: true, reason: "No targetWhatsappNumber set on this reminder" },
+      };
+    }
+
     if (!this.isConfigured()) {
       logger.info("WhatsApp not configured — no-op (would have sent)", {
-        userId: payload.userId,
+        to: payload.targetWhatsappNumber,
         title: payload.title,
       });
       return {
@@ -39,7 +54,7 @@ export const whatsappChannel: ChannelAdapter = {
         },
         body: JSON.stringify({
           messaging_product: "whatsapp",
-          to: payload.userId, // would be the user's registered WhatsApp number in a real setup
+          to: payload.targetWhatsappNumber,
           type: "text",
           text: { body: `${payload.title}\n${payload.message}` },
         }),

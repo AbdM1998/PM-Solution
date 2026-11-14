@@ -34,20 +34,20 @@ export const emailChannel: ChannelAdapter = {
 
     if (!this.isConfigured()) {
       logger.info("SMTP not configured — logging email instead of sending", {
-        to: payload.userEmail,
+        to: payload.targetEmail,
         subject,
       });
       return {
         ok: true,
         simulated: true,
-        providerResponse: { simulated: true, to: payload.userEmail, subject, bodyPreview: text.slice(0, 200) },
+        providerResponse: { simulated: true, to: payload.targetEmail, subject, bodyPreview: text.slice(0, 200) },
       };
     }
 
     try {
       const info = await getTransporter().sendMail({
         from: env.smtpFrom,
-        to: payload.userEmail,
+        to: payload.targetEmail,
         subject,
         text,
       });

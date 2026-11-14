@@ -17,3 +17,17 @@ ios/
 .vscode/
 docker/volumes/
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
+
+# Local/offline deployment package (local/start.bat) — generated/downloaded content,
+# not source. Portable Postgres/Node binaries (~1.5GB), the built app bundle, the
+# runtime database, and generated secrets all regenerate from committed source via
+# local/README.md; none of this belongs in git.
+local/pg-portable/
+local/node-portable/
+local/pg-data/
+local/build-tmp/
+local/app/
+local/local.env
+local/*.log
+local/output.log

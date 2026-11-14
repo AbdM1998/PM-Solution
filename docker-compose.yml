@@ -128,6 +128,12 @@ services:
       # Found by actually running this stack: the web container reported "unhealthy"
       # and its own logs showed "next start" listening on :4000, not :3000.
       PORT: 3000
+      # Read at runtime by next.config.js's rewrites() — proxies the browser's
+      # same-origin "/api/*" calls (NEXT_PUBLIC_API_BASE_URL=/api) to the api
+      # container server-side, so the browser never needs the api container's own
+      # host:port to be reachable (works the same whether this is opened via
+      # 127.0.0.1:3001 or a public tunnel pointed only at this service).
+      API_INTERNAL_URL: http://api:4000
     depends_on:
       api:
         condition: service_healthy
