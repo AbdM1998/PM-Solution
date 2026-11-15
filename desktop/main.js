@@ -104,8 +104,42 @@ async function waitForPort(port, timeoutMs = 30000) {
   return false;
 }
 
+// Marks which bundled migrations have already been applied to this machine's
+// database, so a normal launch can skip the slow one-time setup steps entirely
+// instead of redoing them every single time the app starts.
+const DB_INIT_MARKER = path.join(USER_DATA, "db-init.json");
+
+function bundledMigrationNames() {
+  const dir = path.join(API_DIR, "prisma", "migrations");
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function readDbInitMarker() {
+  try {
+    return JSON.parse(fs.readFileSync(DB_INIT_MARKER, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeDbInitMarker(migrations) {
+  try {
+    fs.writeFileSync(DB_INIT_MARKER, JSON.stringify({ migrations }));
+  } catch {
+    // non-fatal — worst case, the next launch just redoes the setup steps once
+  }
+}
+
 async function startBackend(onStatus) {
-  if (!fs.existsSync(path.join(PG_DATA, "PG_VERSION"))) {
+  const firstTimeInit = !fs.existsSync(path.join(PG_DATA, "PG_VERSION"));
+  if (firstTimeInit) {
     onStatus("Setting up your local database for the first time…");
     fs.mkdirSync(PG_DATA, { recursive: true });
     runSync(path.join(PG_BIN, "initdb.exe"), [
@@ -121,32 +155,49 @@ async function startBackend(onStatus) {
   );
 
   // postgres needs a moment after the process starts before it accepts connections —
-  // poll with pg_isready rather than a fixed sleep.
-  for (let i = 0; i < 40; i++) {
-    const ready = runSync(path.join(PG_BIN, "pg_isready.exe"), ["-h", "127.0.0.1", "-p", String(PG_PORT)]);
-    if (ready.status === 0) break;
-    await new Promise((r) => setTimeout(r, 300));
+  // poll with a raw TCP connect (see tcpPortOpen's comment — anything that spawns a
+  // process or hits Chromium's network stack here is unreliable on this machine) and
+  // a short interval, instead of spawning pg_isready.exe in a loop.
+  for (let i = 0; i < 100; i++) {
+    if (await tcpPortOpen(PG_PORT, "127.0.0.1", 300)) break;
+    await new Promise((r) => setTimeout(r, 150));
   }
 
   const secrets = loadOrCreateSecrets();
   const databaseUrl = `postgresql://projectflow@127.0.0.1:${PG_PORT}/projectflow`;
 
-  const dbCheck = runSync(path.join(PG_BIN, "psql.exe"), [
-    "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres",
-    "-tAc", "SELECT 1 FROM pg_database WHERE datname='projectflow'",
-  ]);
-  if (!dbCheck.stdout?.toString().includes("1")) {
-    onStatus("Creating application database…");
-    runSync(path.join(PG_BIN, "createdb.exe"), [
-      "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "projectflow",
-    ]);
-  }
+  // The slow part of every launch used to be here unconditionally: spawning psql to
+  // check the database exists, then spawning the Prisma CLI (which itself is a slow
+  // cold start, easily 2-5s, worse under this machine's endpoint-security scanning of
+  // every new process) to run `migrate deploy` — every single time, even though both
+  // are no-ops after the very first successful run or after an unchanged update. Skip
+  // both entirely once a marker confirms this machine is already on the bundled
+  // migration set; only re-run them when that set actually changed (a real update) or
+  // on a genuinely fresh install.
+  const currentMigrations = bundledMigrationNames();
+  const marker = readDbInitMarker();
+  const upToDate = marker && JSON.stringify(marker.migrations) === JSON.stringify(currentMigrations);
 
-  onStatus("Applying database updates…");
-  runSync(process.execPath, [
-    path.join(API_DIR, "node_modules", "prisma", "build", "index.js"),
-    "migrate", "deploy", "--schema", path.join("prisma", "schema.prisma"),
-  ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl } });
+  if (!upToDate) {
+    const dbCheck = runSync(path.join(PG_BIN, "psql.exe"), [
+      "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres",
+      "-tAc", "SELECT 1 FROM pg_database WHERE datname='projectflow'",
+    ]);
+    if (!dbCheck.stdout?.toString().includes("1")) {
+      onStatus("Creating application database…");
+      runSync(path.join(PG_BIN, "createdb.exe"), [
+        "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "projectflow",
+      ]);
+    }
+
+    onStatus("Applying database updates…");
+    runSync(process.execPath, [
+      path.join(API_DIR, "node_modules", "prisma", "build", "index.js"),
+      "migrate", "deploy", "--schema", path.join("prisma", "schema.prisma"),
+    ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl } });
+
+    writeDbInitMarker(currentMigrations);
+  }
 
   const lanIp = findLanIp();
 
