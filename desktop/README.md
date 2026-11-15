@@ -44,13 +44,14 @@ Package a distributable:
 npx electron-builder --win nsis
 ```
 
-**Known issue on this machine**: the NSIS packaging step repeatedly hung with no
-progress and no error (same antivirus/endpoint-security interference pattern hit
-throughout this project with Docker and other builds) — never got a working
-`*.nsis.7z` all the way to a signed installer `.exe` here. The build DOES succeed up
-through `dist-installer/win-unpacked/ProjectFlow.exe`, which is a fully working,
-console-free app on its own (confirmed: login, dashboard, the reminder engine, all
-working) — just not wrapped in a one-click installer with a Start Menu shortcut. If
-NSIS packaging works on your machine, `dist-installer/*.exe` is the real installer;
-otherwise, zip `win-unpacked/` and hand that over — unzip once, run
-`ProjectFlow.exe` inside, done.
+**Known issue on this machine**: the NSIS packaging step has intermittently hung with
+no progress and no error (same antivirus/endpoint-security interference pattern hit
+throughout this project with Docker and other builds) — when it hung, only
+`dist-installer/win-unpacked/ProjectFlow.exe` got produced (a fully working,
+console-free app on its own: login, dashboard, the reminder engine, all confirmed
+working), not a one-click installer. On a later rebuild the exact same config
+succeeded and produced a real `ProjectFlow Setup 1.0.0.exe` (confirmed working:
+installs, runs, Admin/Reports pages all functional). So it's worth just trying
+`npx electron-builder --win nsis` again if it hangs — if it still won't finish,
+zip `win-unpacked/` and hand that over instead: unzip once, run `ProjectFlow.exe`
+inside, done.

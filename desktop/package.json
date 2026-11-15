@@ -18,7 +18,7 @@
     "productName": "ProjectFlow",
     "asar": true,
     "directories": {
-      "output": "dist-installer2"
+      "output": "dist-installer3"
     },
     "extraResources": [
       {
