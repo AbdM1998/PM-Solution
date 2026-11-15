@@ -1,0 +1,57 @@
+{
+  "name": "projectflow-desktop",
+  "version": "1.0.0",
+  "description": "ProjectFlow — local, offline desktop app",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.17",
+    "png-to-ico": "^3.0.2"
+  },
+  "build": {
+    "appId": "com.projectflow.desktop",
+    "productName": "ProjectFlow",
+    "asar": true,
+    "directories": {
+      "output": "dist-installer2"
+    },
+    "extraResources": [
+      {
+        "from": "resources/pg-portable",
+        "to": "pg-portable"
+      },
+      {
+        "from": "resources/app",
+        "to": "app"
+      }
+    ],
+    "files": [
+      "main.js",
+      "build/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ProjectFlow"
+    }
+  }
+}

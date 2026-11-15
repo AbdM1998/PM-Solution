@@ -33,3 +33,10 @@ local/*.log
 local/output.log
 local/ProjectFlow.exe
 /ProjectFlow-Local.zip
+
+# Electron desktop app build output / downloaded resources — same reasoning as local/
+desktop/node_modules/
+desktop/resources/
+desktop/dist-installer/
+desktop/dist-installer2/
+/ProjectFlow-Desktop.zip
