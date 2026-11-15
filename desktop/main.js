@@ -3,12 +3,13 @@
 // (no console window ever appears — this is the whole point versus the start.bat /
 // ProjectFlow.exe console launcher), and shows the app in a real app window instead
 // of the user's own browser.
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, Tray, Menu, session } = require("electron");
 const { spawn, fork } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
+const http = require("http");
 
 // app.isPackaged is false when running via `electron .` in dev, true inside the
 // built installer — resourcesPath only exists/matters in the packaged app.
@@ -65,12 +66,29 @@ function findLanIp() {
   return candidates.find((ip) => ip.startsWith("192.168.")) ?? candidates[0] ?? null;
 }
 
+function httpStatusOnce(url) {
+  // Plain Node http, not fetch: Electron's fetch goes through Chromium's network
+  // stack, which picks up the system/corporate proxy config — on a machine with a
+  // VPN client (Ivanti, Cloudflare One, etc.) that can route all traffic through a
+  // proxy that can't reach 127.0.0.1, so fetch() here just hangs forever even once
+  // the server is actually healthy (confirmed: curl to the same URL worked instantly
+  // while this was stuck). Node's http module never consults that proxy config.
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: 2000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+  });
+}
+
 async function waitForHttp(url, timeoutMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(url);
-      if (res.ok || res.status === 307 || res.status === 404) return true;
+      const status = await httpStatusOnce(url);
+      if (status < 500) return true;
     } catch {
       // not up yet
     }
@@ -221,6 +239,13 @@ function loadSplash(win) {
 }
 
 app.whenReady().then(async () => {
+  // Force localhost traffic to bypass any system/corporate proxy (VPN clients like
+  // Ivanti or Cloudflare One commonly route everything through a proxy that can't
+  // reach 127.0.0.1) — otherwise the window itself can hang or fail to load the app
+  // even once the server is confirmed healthy, the same issue waitForHttp works
+  // around above by using plain Node http instead of fetch.
+  await session.defaultSession.setProxy({ proxyRules: "direct://", proxyBypassRules: "<local>,127.0.0.1,localhost" });
+
   const win = createWindow();
   loadSplash(win);
   win.show();
@@ -238,18 +263,26 @@ app.whenReady().then(async () => {
     ).catch(() => {});
   }
 
-  // Tray icon so a user who closed the window can reopen it or truly quit.
-  const icon = nativeImage.createEmpty();
-  tray = new Tray(icon.isEmpty() ? path.join(__dirname, "build", "icon.png") : icon);
-  tray.setToolTip("ProjectFlow");
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "Open ProjectFlow", click: () => { mainWindow.show(); } },
-      { type: "separator" },
-      { label: "Quit ProjectFlow", click: () => { app.isQuitting = true; app.quit(); } },
-    ])
-  );
-  tray.on("click", () => mainWindow.show());
+  // Tray icon so a user who closed the window can reopen it or truly quit. This must
+  // never throw — if it does, the app.on("activate") handler below never gets
+  // registered, and a closed/hidden window becomes permanently unreachable (the exact
+  // bug that made "I can't get back into it" happen: this used to pass a path to a
+  // build/icon.png that didn't exist, which made `new Tray()` throw and silently skip
+  // everything after it).
+  try {
+    tray = new Tray(path.join(__dirname, "build", "icon.png"));
+    tray.setToolTip("ProjectFlow");
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: "Open ProjectFlow", click: () => { mainWindow.show(); } },
+        { type: "separator" },
+        { label: "Quit ProjectFlow", click: () => { app.isQuitting = true; app.quit(); } },
+      ])
+    );
+    tray.on("click", () => mainWindow.show());
+  } catch (err) {
+    console.error("Failed to create tray icon:", err);
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
