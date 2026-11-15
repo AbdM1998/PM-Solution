@@ -76,6 +76,15 @@ export interface Task {
   updatedAt: string;
 }
 
+// ADDED for the cross-project Board (Kanban) page: GET /tasks (no project scope)
+// returns every task the user can access across all their projects, denormalized
+// with the owning project's name/color for display — a plain Task alone doesn't
+// carry enough to label a card on a board that spans projects.
+export interface BoardTask extends Task {
+  projectName: string;
+  projectColor?: string | null;
+}
+
 export interface ChecklistItem {
   id: string;
   taskId: string;

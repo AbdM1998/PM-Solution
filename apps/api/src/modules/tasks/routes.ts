@@ -35,6 +35,16 @@ tasksRouter.use(requireAuth);
 const ReorderInput = z.array(z.object({ taskId: z.string(), newIndex: z.number().int().min(0) }));
 const BulkCompleteInput = z.object({ taskIds: z.array(z.string()).min(1) });
 
+// GET /api/tasks (no :id) — every task across every project this user can access, for
+// the cross-project Board page. Placed before "/:id" so Express doesn't swallow it.
+tasksRouter.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const tasks = await tasksService.listAllTasksForUser(req.user!.id);
+    res.json(tasks);
+  })
+);
+
 tasksRouter.post(
   "/reorder",
   validateBody(ReorderInput),

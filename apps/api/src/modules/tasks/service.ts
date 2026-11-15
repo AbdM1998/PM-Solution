@@ -53,6 +53,26 @@ export async function listTasks(userId: string, projectId: string, filters: List
   return { items: tasks.map(toWireTask), total, page, pageSize };
 }
 
+/** Cross-project task list for the Board page — every task in a project this user
+ * owns or is a member of, grouped by status client-side. Unlike listTasks (one
+ * project, paginated), this is a flat list across all accessible projects; call
+ * sites are expected to keep this to a reasonable scale (a personal/small-team tool,
+ * not an enterprise-scale task count), so no pagination here. */
+export async function listAllTasksForUser(userId: string) {
+  const tasks = await prisma.task.findMany({
+    where: {
+      project: { OR: [{ ownerId: userId }, { members: { some: { userId } } }] },
+    },
+    include: { project: { select: { id: true, name: true, color: true } } },
+    orderBy: [{ status: "asc" }, { orderIndex: "asc" }],
+  });
+  return tasks.map((t) => ({
+    ...toWireTask(t),
+    projectName: t.project.name,
+    projectColor: t.project.color,
+  }));
+}
+
 export async function createTask(userId: string, projectId: string, input: CreateTaskInput) {
   await assertProjectAccess(userId, projectId);
   const maxOrder = await prisma.task.aggregate({ where: { projectId }, _max: { orderIndex: true } });

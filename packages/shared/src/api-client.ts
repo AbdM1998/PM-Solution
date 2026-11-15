@@ -1,7 +1,7 @@
 import type {
   Project, Task, ChecklistItem, ChecklistTemplate, Reminder, ReminderOccurrence,
   DashboardSummary, MyDay, PaginatedResult, User, EmailThread, EmailMessage,
-  Tag, ActivityEntry, AppNotification, DevicePlatform,
+  Tag, ActivityEntry, AppNotification, DevicePlatform, BoardTask,
 } from "./types";
 
 export interface ApiClientOptions {
@@ -106,6 +106,10 @@ export class ApiClient {
   listTasks(projectId: string, params: Record<string, string> = {}) {
     const qs = new URLSearchParams(params).toString();
     return this.request<PaginatedResult<Task>>(`/projects/${projectId}/tasks${qs ? `?${qs}` : ""}`);
+  }
+  // For the cross-project Board page — every task across every accessible project.
+  listAllTasks() {
+    return this.request<BoardTask[]>("/tasks");
   }
   createTask(projectId: string, data: unknown) {
     return this.request<Task>(`/projects/${projectId}/tasks`, { method: "POST", body: JSON.stringify(data) });

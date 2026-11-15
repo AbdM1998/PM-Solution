@@ -31,3 +31,5 @@ local/app/
 local/local.env
 local/*.log
 local/output.log
+local/ProjectFlow.exe
+/ProjectFlow-Local.zip

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, FolderKanban, LayoutDashboard, Sun } from "lucide-react";
+import { CalendarDays, FolderKanban, LayoutDashboard, Sun, Trello } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/my-day", label: "My Day", icon: Sun },
   { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/board", label: "Board", icon: Trello },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
 ];
 

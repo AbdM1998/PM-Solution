@@ -76,7 +76,11 @@ for /f "tokens=2 delims=:" %%A in ('ipconfig ^| findstr /c:"IPv4 Address" ^| fin
 set LAN_IP=%LAN_IP: =%
 
 echo Starting the app server...
-start "ProjectFlow API" /min cmd /c "set DATABASE_URL=%DATABASE_URL%&& set JWT_SECRET=%JWT_SECRET%&& set ENCRYPTION_KEY=%ENCRYPTION_KEY%&& set PORT=%API_PORT%&& set WEB_ORIGIN=http://127.0.0.1:%WEB_PORT%&& set MOBILE_ORIGIN=http://%LAN_IP%:%WEB_PORT%&& "%NODE_EXE%" dist\server.js"
+REM SMTP_HOST is intentionally left blank: no real mail server is configured, so the
+REM EMAIL channel logs/simulates sends instead of claiming a real delivery (per the
+REM project's anti-fakery rule). SMTP_FROM still controls the sender shown in that
+REM simulated log/notification, so it reflects the intended real sender.
+start "ProjectFlow API" /min cmd /c "set DATABASE_URL=%DATABASE_URL%&& set JWT_SECRET=%JWT_SECRET%&& set ENCRYPTION_KEY=%ENCRYPTION_KEY%&& set PORT=%API_PORT%&& set WEB_ORIGIN=http://127.0.0.1:%WEB_PORT%&& set MOBILE_ORIGIN=http://%LAN_IP%:%WEB_PORT%&& set SMTP_FROM=ProjectFlow ^<abdalruhman.mustafa@gmail.com^>&& "%NODE_EXE%" dist\server.js"
 
 echo Starting the reminder engine...
 start "ProjectFlow Worker" /min cmd /c "set DATABASE_URL=%DATABASE_URL%&& "%NODE_EXE%" dist\worker-entry.js"
