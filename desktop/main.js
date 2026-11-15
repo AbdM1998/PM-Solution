@@ -3,7 +3,7 @@
 // (no console window ever appears — this is the whole point versus the start.bat /
 // ProjectFlow.exe console launcher), and shows the app in a real app window instead
 // of the user's own browser.
-const { app, BrowserWindow, Tray, Menu, session } = require("electron");
+const { app, BrowserWindow, Tray, Menu } = require("electron");
 const { spawn, fork } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -239,13 +239,6 @@ function loadSplash(win) {
 }
 
 app.whenReady().then(async () => {
-  // Force localhost traffic to bypass any system/corporate proxy (VPN clients like
-  // Ivanti or Cloudflare One commonly route everything through a proxy that can't
-  // reach 127.0.0.1) — otherwise the window itself can hang or fail to load the app
-  // even once the server is confirmed healthy, the same issue waitForHttp works
-  // around above by using plain Node http instead of fetch.
-  await session.defaultSession.setProxy({ proxyRules: "direct://", proxyBypassRules: "<local>,127.0.0.1,localhost" });
-
   const win = createWindow();
   loadSplash(win);
   win.show();
