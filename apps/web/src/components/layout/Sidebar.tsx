@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, FolderKanban, LayoutDashboard, Sun, Trello } from "lucide-react";
+import { CalendarDays, FolderKanban, LayoutDashboard, ShieldCheck, Sun, Trello, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -11,14 +12,19 @@ const NAV_ITEMS = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/board", label: "Board", icon: Trello },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
 ];
+
+const ADMIN_NAV_ITEM = { href: "/admin", label: "Admin", icon: ShieldCheck };
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const items = user?.isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   return (
     <nav className="flex flex-col gap-0.5 px-2">
-      {NAV_ITEMS.map((item) => {
+      {items.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const Icon = item.icon;
         return (

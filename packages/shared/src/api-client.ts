@@ -2,6 +2,7 @@ import type {
   Project, Task, ChecklistItem, ChecklistTemplate, Reminder, ReminderOccurrence,
   DashboardSummary, MyDay, PaginatedResult, User, EmailThread, EmailMessage,
   Tag, ActivityEntry, AppNotification, DevicePlatform, BoardTask,
+  AdminUser, IntegrationsStatus, ReportsSummary,
 } from "./types";
 
 export interface ApiClientOptions {
@@ -244,5 +245,24 @@ export class ApiClient {
   }
   markAllNotificationsRead() {
     return this.request<void>("/notifications/read-all", { method: "POST" });
+  }
+
+  // ---- Admin ----
+  listAdminUsers() {
+    return this.request<AdminUser[]>("/admin/users");
+  }
+  setUserAdmin(id: string, isAdmin: boolean) {
+    return this.request<void>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ isAdmin }) });
+  }
+  deleteAdminUser(id: string) {
+    return this.request<void>(`/admin/users/${id}`, { method: "DELETE" });
+  }
+  getIntegrationsStatus() {
+    return this.request<IntegrationsStatus>("/admin/integrations");
+  }
+
+  // ---- Reports ----
+  getReportsSummary() {
+    return this.request<ReportsSummary>("/reports/summary");
   }
 }

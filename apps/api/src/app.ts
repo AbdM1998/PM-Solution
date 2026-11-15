@@ -17,6 +17,8 @@ import { emailThreadsRouter, emailConnectionsRouter } from "./modules/email/rout
 import { dashboardRouter } from "./modules/dashboard/routes";
 import { tagsRouter } from "./modules/tags/routes";
 import { healthRouter } from "./modules/health/routes";
+import { adminRouter } from "./modules/admin/routes";
+import { reportsRouter } from "./modules/reports/routes";
 
 export function createApp() {
   const app = express();
@@ -67,6 +69,8 @@ export function createApp() {
   app.use("/api/email-connections", emailConnectionsRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/tags", tagsRouter);
+  app.use("/api/admin", adminRouter);
+  app.use("/api/reports", reportsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

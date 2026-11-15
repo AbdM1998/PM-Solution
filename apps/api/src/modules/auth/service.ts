@@ -6,8 +6,8 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from "./jwt";
 
 const BCRYPT_COST = 12;
 
-function toPublicUser(user: { id: string; email: string; name: string; timezone: string }) {
-  return { id: user.id, email: user.email, name: user.name, timezone: user.timezone };
+function toPublicUser(user: { id: string; email: string; name: string; timezone: string; isAdmin: boolean }) {
+  return { id: user.id, email: user.email, name: user.name, timezone: user.timezone, isAdmin: user.isAdmin };
 }
 
 export async function register(input: RegisterInput) {
@@ -15,8 +15,9 @@ export async function register(input: RegisterInput) {
   if (existing) throw AppError.conflict("An account with this email already exists");
 
   const passwordHash = await bcrypt.hash(input.password, BCRYPT_COST);
+  const userCount = await prisma.user.count();
   const user = await prisma.user.create({
-    data: { email: input.email, passwordHash, name: input.name },
+    data: { email: input.email, passwordHash, name: input.name, isAdmin: userCount === 0 },
   });
 
   return {

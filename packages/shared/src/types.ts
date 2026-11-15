@@ -17,6 +17,39 @@ export interface User {
   email: string;
   name: string;
   timezone: string;
+  isAdmin: boolean;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  isAdmin: boolean;
+  createdAt: string;
+  projectCount: number;
+  taskCount: number;
+}
+
+export interface IntegrationsStatus {
+  email: { configured: boolean; from: string | null };
+  whatsapp: { configured: boolean };
+}
+
+export interface ReportsSummary {
+  projectsByStatus: Record<string, number>;
+  tasksByStatus: Record<string, number>;
+  tasksByPriority: Record<string, number>;
+  overdueCount: number;
+  completedThisWeek: number;
+  projects: {
+    id: string;
+    name: string;
+    color?: string | null;
+    status: ProjectStatus;
+    totalTasks: number;
+    completedTasks: number;
+    completionPct: number;
+  }[];
 }
 
 export interface Project {

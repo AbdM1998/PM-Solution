@@ -115,6 +115,12 @@ model User {
   passwordHash String
   name         String
   timezone     String   @default("UTC")
+  // The very first account ever registered on a given deployment becomes admin
+  // automatically (see auth/service.ts's register()) — there's no separate signup
+  // flow or invite system, so this is the only self-sufficient way to bootstrap the
+  // first admin on any fresh install (including one someone else sets up from
+  // scratch) without a manual DB edit. Admin-only: GET/PATCH/DELETE under /api/admin.
+  isAdmin      Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
