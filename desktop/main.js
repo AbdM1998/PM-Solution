@@ -152,23 +152,30 @@ function writeDbInitMarker(migrations) {
   }
 }
 
-async function startBackend(onStatus) {
-  const firstTimeInit = !fs.existsSync(path.join(PG_DATA, "PG_VERSION"));
-  if (firstTimeInit) {
-    onStatus("Setting up your local database for the first time…");
-    fs.mkdirSync(PG_DATA, { recursive: true });
-    await runAsync(path.join(PG_BIN, "initdb.exe"), [
-      "-D", PG_DATA, "--username=projectflow", "--auth=trust", "-E", "UTF8",
-    ], { timeout: 30000 });
-  }
+async function initPgData() {
+  fs.mkdirSync(PG_DATA, { recursive: true });
+  await runAsync(path.join(PG_BIN, "initdb.exe"), [
+    "-D", PG_DATA, "--username=projectflow", "--auth=trust", "-E", "UTF8",
+  ], { timeout: 30000 });
+}
 
-  onStatus("Starting database…");
+async function startPostgresAndWaitForPort() {
+  // detached: true is load-bearing, not cosmetic. Without it, postgres.exe inherits
+  // the Electron process's Windows Job Object — and on this machine, whatever job
+  // object policy the endpoint-security software applies there silently breaks
+  // postgres's own per-connection worker processes (postgres on Windows has no
+  // fork(), so EXEC_BACKEND spawns a brand new postgres.exe for every client
+  // connection via CreateProcess). The symptom was exactly this: the postmaster logs
+  // "ready to accept connections" and accepts the TCP socket, but the connection then
+  // hangs forever — confirmed by spawning the identical command with and without
+  // `detached` from an ELECTRON_RUN_AS_NODE script: only the detached version ever
+  // actually answered a query. No other postgres-startup fix in this file (reinit,
+  // restart, wipe) addressed the real cause; they just raced against it.
   pgProcess = spawn(
     path.join(PG_BIN, "postgres.exe"),
     ["-D", PG_DATA, "-p", String(PG_PORT), "-h", "0.0.0.0"],
-    { windowsHide: true, stdio: "ignore" }
+    { windowsHide: true, stdio: "ignore", detached: true }
   );
-
   // postgres needs a moment after the process starts before it accepts connections —
   // poll with a raw TCP connect (see tcpPortOpen's comment — anything that spawns a
   // process or hits Chromium's network stack here is unreliable on this machine) and
@@ -176,6 +183,79 @@ async function startBackend(onStatus) {
   for (let i = 0; i < 100; i++) {
     if (await tcpPortOpen(PG_PORT, "127.0.0.1", 300)) break;
     await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
+async function postgresIsAlive() {
+  // A TCP-accepted connection doesn't guarantee postgres is actually answering
+  // queries — seen on this machine: the postmaster accepts the socket but never
+  // completes a backend handshake (likely leftover state from an earlier unclean
+  // shutdown, or deeper cluster corruption from one). A real query with a short
+  // timeout catches that.
+  const result = await runAsync(path.join(PG_BIN, "psql.exe"), [
+    "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres", "-tAc", "SELECT 1",
+  ], { timeout: 4000 });
+  return result.stdout?.toString().includes("1");
+}
+
+async function startBackend(onStatus) {
+  let firstTimeInit = !fs.existsSync(path.join(PG_DATA, "PG_VERSION"));
+  if (firstTimeInit) {
+    onStatus("Setting up your local database for the first time…");
+    await initPgData();
+  }
+
+  onStatus("Starting database…");
+  await startPostgresAndWaitForPort();
+
+  // Seen repeatedly on this machine, confirmed by extensive direct testing: the
+  // postmaster can accept the TCP connection and log "ready to accept connections",
+  // then never complete a single query — not deterministically (the identical spawn
+  // sometimes works instantly, sometimes doesn't), consistent with endpoint-security
+  // software intermittently interfering with postgres's own per-connection worker
+  // processes (postgres on Windows has no fork(); EXEC_BACKEND spawns a brand new
+  // postgres.exe per client via CreateProcess, which is exactly the kind of operation
+  // that kind of software inspects/throttles). Since it's probabilistic rather than a
+  // fixed broken state, retrying the whole restart a few times has a real chance of
+  // landing on a working instance even when earlier attempts didn't — a single retry
+  // isn't enough to rely on.
+  let attempt = 0;
+  let wiped = false;
+  while (!(await postgresIsAlive())) {
+    attempt++;
+    if (attempt > 4) break; // give up — startBackend's caller will surface the failure
+    if (wiped) {
+      onStatus(`Database isn't responding — retrying (${attempt}/4)…`);
+      try { pgProcess.kill(); } catch {}
+      await new Promise((r) => setTimeout(r, 1500));
+      await startPostgresAndWaitForPort();
+    } else if (attempt <= 2) {
+      onStatus(`Database isn't responding — retrying (${attempt}/4)…`);
+      try { pgProcess.kill(); } catch {}
+      await new Promise((r) => setTimeout(r, 1500));
+      await startPostgresAndWaitForPort();
+    } else {
+      // Plain restarts alone didn't do it twice in a row — try a full reset once,
+      // since actual cluster corruption (as opposed to a transient bad connection)
+      // does need this. The local database only ever holds this machine's own
+      // projects/tasks, so wiping and reinitializing a fresh, known-good cluster is
+      // safe.
+      onStatus(`Database needs to be reset — retrying (${attempt}/4)…`);
+      try { pgProcess.kill(); } catch {}
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        fs.rmSync(PG_DATA, { recursive: true, force: true });
+      } catch {
+        // A lingering file handle from the just-killed process can make the first
+        // attempt fail — give Windows a moment to release it and try once more.
+        await new Promise((r) => setTimeout(r, 3000));
+        fs.rmSync(PG_DATA, { recursive: true, force: true });
+      }
+      await initPgData();
+      firstTimeInit = true;
+      wiped = true;
+      await startPostgresAndWaitForPort();
+    }
   }
 
   const secrets = loadOrCreateSecrets();
@@ -191,7 +271,13 @@ async function startBackend(onStatus) {
   // on a genuinely fresh install.
   const currentMigrations = bundledMigrationNames();
   const marker = readDbInitMarker();
-  const upToDate = marker && JSON.stringify(marker.migrations) === JSON.stringify(currentMigrations);
+  // A fresh initdb this run means a brand new, empty Postgres cluster — the
+  // "projectflow" database and its tables don't exist yet no matter what an old
+  // marker (which lives separately, outside PG_DATA) says. Treating it as "already
+  // up to date" would skip createdb/migrate entirely and leave the API unable to
+  // connect to a database that was never created — always redo setup after a fresh
+  // initdb.
+  const upToDate = !firstTimeInit && marker && JSON.stringify(marker.migrations) === JSON.stringify(currentMigrations);
 
   if (!upToDate) {
     const dbCheck = await runAsync(path.join(PG_BIN, "psql.exe"), [

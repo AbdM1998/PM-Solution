@@ -22,14 +22,39 @@ export class ApiClient {
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = this.opts.getAccessToken();
-    const res = await fetch(`${this.opts.baseUrl}${path}`, {
+    const fullInit: RequestInit = {
       ...init,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
-    });
+    };
+
+    // Retry purely network-level failures (fetch() throwing — the browser never got a
+    // response at all) a few times before giving up. On some machines the local
+    // server's own network connection is intermittently intercepted/delayed by
+    // endpoint-security software: confirmed by direct inspection that the exact same
+    // request can fail outright and then succeed again seconds later on the same page,
+    // with the server never actually going down. A short, bounded retry absorbs that
+    // without masking a real server error (non-network failures, like 401/500, are
+    // never retried here — they're legitimate responses, not dropped connections).
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.doRequest<T>(path, fullInit);
+      } catch (err) {
+        lastErr = err;
+        const isNetworkFailure = err instanceof TypeError;
+        if (!isNetworkFailure || attempt === 2) throw err;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+    throw lastErr;
+  }
+
+  private async doRequest<T>(path: string, init: RequestInit): Promise<T> {
+    const res = await fetch(`${this.opts.baseUrl}${path}`, init);
     if (res.status === 401) {
       this.opts.onUnauthorized?.();
     }
