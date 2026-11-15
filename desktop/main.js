@@ -9,7 +9,18 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
-const http = require("http");
+const net = require("net");
+
+// Must run before app is ready / any session touches the network stack. Machines
+// running a corporate VPN client (Ivanti, Cloudflare One, etc.) often configure a
+// system proxy that intercepts ALL traffic including 127.0.0.1 — Chromium's renderer
+// (unlike plain Node's http module, which ignores system proxy settings) honors that
+// by default, so the app's own login/register fetch() calls, and even the window's own
+// navigation to the app's page, can fail or hang indefinitely even though the local
+// server is completely healthy. A --proxy-bypass-list alone wasn't reliable here, and
+// this app never needs to reach the internet anyway (everything is local by design),
+// so just disable proxying for the whole app outright.
+app.commandLine.appendSwitch("no-proxy-server");
 
 // app.isPackaged is false when running via `electron .` in dev, true inside the
 // built installer — resourcesPath only exists/matters in the packaged app.
@@ -66,32 +77,28 @@ function findLanIp() {
   return candidates.find((ip) => ip.startsWith("192.168.")) ?? candidates[0] ?? null;
 }
 
-function httpStatusOnce(url) {
-  // Plain Node http, not fetch: Electron's fetch goes through Chromium's network
-  // stack, which picks up the system/corporate proxy config — on a machine with a
-  // VPN client (Ivanti, Cloudflare One, etc.) that can route all traffic through a
-  // proxy that can't reach 127.0.0.1, so fetch() here just hangs forever even once
-  // the server is actually healthy (confirmed: curl to the same URL worked instantly
-  // while this was stuck). Node's http module never consults that proxy config.
-  return new Promise((resolve, reject) => {
-    const req = http.get(url, { timeout: 2000 }, (res) => {
-      res.resume();
-      resolve(res.statusCode);
-    });
-    req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", reject);
+function tcpPortOpen(port, host = "127.0.0.1", timeoutMs = 1500) {
+  // Plain TCP connect via Node's net module — NOT http/fetch. In Electron's main
+  // process (unlike a standalone `ELECTRON_RUN_AS_NODE=1` script, which uses pure
+  // Node), even `require("http")` requests get routed through Chromium's own network
+  // service for consistency with the renderer — so they inherit the exact same
+  // system/corporate-proxy interference (VPN clients like Ivanti, Cloudflare One) that
+  // breaks renderer fetches, and can hang indefinitely even once the server is
+  // actually healthy (confirmed with curl, and with a standalone ELECTRON_RUN_AS_NODE
+  // script, both instant). A raw socket connect has no HTTP semantics for a proxy to
+  // intercept, so it reliably answers "is something listening on this port yet".
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ port, host, timeout: timeoutMs });
+    socket.once("connect", () => { socket.destroy(); resolve(true); });
+    socket.once("timeout", () => { socket.destroy(); resolve(false); });
+    socket.once("error", () => resolve(false));
   });
 }
 
-async function waitForHttp(url, timeoutMs = 30000) {
+async function waitForPort(port, timeoutMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    try {
-      const status = await httpStatusOnce(url);
-      if (status < 500) return true;
-    } catch {
-      // not up yet
-    }
+    if (await tcpPortOpen(port)) return true;
     await new Promise((r) => setTimeout(r, 400));
   }
   return false;
@@ -182,7 +189,7 @@ async function startBackend(onStatus) {
   });
 
   onStatus("Waiting for the app to come online…");
-  await waitForHttp(`http://127.0.0.1:${WEB_PORT}`);
+  await waitForPort(WEB_PORT);
 }
 
 function stopBackend() {
@@ -249,10 +256,34 @@ app.whenReady().then(async () => {
         `document.getElementById('status') && (document.getElementById('status').innerText = ${JSON.stringify(status)})`
       ).catch(() => {});
     });
-    win.loadURL(`http://127.0.0.1:${WEB_PORT}`);
+    // Chromium's own network process (used by loadURL, unlike the plain-socket
+    // readiness check above) appears to be intermittently intercepted/delayed by
+    // endpoint-security software on this machine — the exact same local server that
+    // TCP-connects instantly sometimes takes loadURL several seconds, or one attempt,
+    // to get through. Retry a few times before giving up and showing an error.
+    let loaded = false;
+    let lastErr;
+    for (let attempt = 1; attempt <= 5 && !loaded; attempt++) {
+      try {
+        await win.loadURL(`http://127.0.0.1:${WEB_PORT}`);
+        loaded = true;
+      } catch (loadErr) {
+        lastErr = loadErr;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    if (!loaded) {
+      win.webContents.executeJavaScript(
+        `document.getElementById('status') && (document.getElementById('status').innerText = ${JSON.stringify(
+          "Could not load the app: " + (lastErr?.message || String(lastErr))
+        )})`
+      ).catch(() => {});
+    }
   } catch (err) {
     win.webContents.executeJavaScript(
-      `document.getElementById('status') && (document.getElementById('status').innerText = 'Something went wrong starting ProjectFlow.')`
+      `document.getElementById('status') && (document.getElementById('status').innerText = ${JSON.stringify(
+        "Something went wrong starting ProjectFlow: " + (err?.message || String(err))
+      )})`
     ).catch(() => {});
   }
 
