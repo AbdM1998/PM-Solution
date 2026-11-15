@@ -44,9 +44,24 @@ let apiProcess;
 let workerProcess;
 let webProcess;
 
-function runSync(cmd, args, opts = {}) {
-  const { spawnSync } = require("child_process");
-  return spawnSync(cmd, args, { windowsHide: true, ...opts });
+// Async, NOT spawnSync. spawnSync blocks the entire main process — including the
+// window's message pump — until the child exits. If this machine's endpoint-security
+// software (the same pattern behind the network-stack fixes above) delays or hangs
+// any one of the child processes below, spawnSync would freeze the whole app with no
+// recourse, which is exactly what "ProjectFlow (Not Responding)" looks like. An async
+// spawn keeps the UI thread free the whole time, and a timeout means one stuck child
+// process can no longer hang the app forever.
+function runAsync(cmd, args, opts = {}) {
+  return new Promise((resolve) => {
+    const { spawn: spawnChild } = require("child_process");
+    const timeoutMs = opts.timeout ?? 15000;
+    const child = spawnChild(cmd, args, { windowsHide: true, ...opts });
+    let stdout = "";
+    child.stdout?.on("data", (d) => { stdout += d; });
+    const timer = setTimeout(() => { try { child.kill(); } catch {} }, timeoutMs);
+    child.on("close", (code) => { clearTimeout(timer); resolve({ status: code, stdout }); });
+    child.on("error", () => { clearTimeout(timer); resolve({ status: null, stdout }); });
+  });
 }
 
 function loadOrCreateSecrets() {
@@ -142,9 +157,9 @@ async function startBackend(onStatus) {
   if (firstTimeInit) {
     onStatus("Setting up your local database for the first time…");
     fs.mkdirSync(PG_DATA, { recursive: true });
-    runSync(path.join(PG_BIN, "initdb.exe"), [
+    await runAsync(path.join(PG_BIN, "initdb.exe"), [
       "-D", PG_DATA, "--username=projectflow", "--auth=trust", "-E", "UTF8",
-    ]);
+    ], { timeout: 30000 });
   }
 
   onStatus("Starting database…");
@@ -179,22 +194,22 @@ async function startBackend(onStatus) {
   const upToDate = marker && JSON.stringify(marker.migrations) === JSON.stringify(currentMigrations);
 
   if (!upToDate) {
-    const dbCheck = runSync(path.join(PG_BIN, "psql.exe"), [
+    const dbCheck = await runAsync(path.join(PG_BIN, "psql.exe"), [
       "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres",
       "-tAc", "SELECT 1 FROM pg_database WHERE datname='projectflow'",
-    ]);
+    ], { timeout: 10000 });
     if (!dbCheck.stdout?.toString().includes("1")) {
       onStatus("Creating application database…");
-      runSync(path.join(PG_BIN, "createdb.exe"), [
+      await runAsync(path.join(PG_BIN, "createdb.exe"), [
         "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "projectflow",
-      ]);
+      ], { timeout: 10000 });
     }
 
     onStatus("Applying database updates…");
-    runSync(process.execPath, [
+    await runAsync(process.execPath, [
       path.join(API_DIR, "node_modules", "prisma", "build", "index.js"),
       "migrate", "deploy", "--schema", path.join("prisma", "schema.prisma"),
-    ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl } });
+    ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl }, timeout: 30000 });
 
     writeDbInitMarker(currentMigrations);
   }
@@ -311,16 +326,22 @@ app.whenReady().then(async () => {
     // readiness check above) appears to be intermittently intercepted/delayed by
     // endpoint-security software on this machine — the exact same local server that
     // TCP-connects instantly sometimes takes loadURL several seconds, or one attempt,
-    // to get through. Retry a few times before giving up and showing an error.
+    // to get through, and sometimes the call just hangs rather than rejecting (plain
+    // retry-on-catch alone would then never get a second attempt). Race each attempt
+    // against its own timeout, stop() the hung navigation, and try again.
     let loaded = false;
     let lastErr;
-    for (let attempt = 1; attempt <= 5 && !loaded; attempt++) {
+    for (let attempt = 1; attempt <= 8 && !loaded; attempt++) {
       try {
-        await win.loadURL(`http://127.0.0.1:${WEB_PORT}`);
+        await Promise.race([
+          win.loadURL(`http://127.0.0.1:${WEB_PORT}`),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("loadURL timed out")), 5000)),
+        ]);
         loaded = true;
       } catch (loadErr) {
         lastErr = loadErr;
-        await new Promise((r) => setTimeout(r, 1500));
+        try { win.webContents.stop(); } catch {}
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
     if (!loaded) {
