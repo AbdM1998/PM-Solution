@@ -148,21 +148,15 @@ async function initPgData() {
 }
 
 async function startPostgresAndWaitForPort() {
-  // detached: true is load-bearing, not cosmetic. Without it, postgres.exe inherits
-  // the Electron process's Windows Job Object — and on this machine, whatever job
-  // object policy the endpoint-security software applies there silently breaks
-  // postgres's own per-connection worker processes (postgres on Windows has no
-  // fork(), so EXEC_BACKEND spawns a brand new postgres.exe for every client
-  // connection via CreateProcess). The symptom was exactly this: the postmaster logs
-  // "ready to accept connections" and accepts the TCP socket, but the connection then
-  // hangs forever — confirmed by spawning the identical command with and without
-  // `detached` from an ELECTRON_RUN_AS_NODE script: only the detached version ever
-  // actually answered a query. No other postgres-startup fix in this file (reinit,
-  // restart, wipe) addressed the real cause; they just raced against it.
+  // Never `detached: true` here. On Windows that starts postgres with no console at
+  // all, and postgres spawns a new postgres.exe for every connection and background
+  // worker (no fork() on Windows) — each of which then gets its own brand new,
+  // visible console window. windowsHide alone gives the postmaster a hidden console
+  // that all of its children inherit, so none of them ever show a window.
   pgProcess = spawn(
     path.join(PG_BIN, "postgres.exe"),
     ["-D", PG_DATA, "-p", String(PG_PORT), "-h", "0.0.0.0"],
-    { windowsHide: true, stdio: "ignore", detached: true }
+    { windowsHide: true, stdio: "ignore" }
   );
   // postgres needs a moment after the process starts before it accepts connections —
   // poll with a raw TCP connect (see tcpPortOpen's comment — anything that spawns a
