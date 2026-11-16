@@ -4,7 +4,7 @@
 // ProjectFlow.exe console launcher), and shows the app in a real app window instead
 // of the user's own browser.
 const { app, BrowserWindow, Tray, Menu } = require("electron");
-const { spawn, fork } = require("child_process");
+const { fork } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -53,6 +53,7 @@ const PG_DATA = path.join(USER_DATA, "pg-data"); // lives outside the installed 
 const API_DIR = path.join(RES, "app", "api");
 const WEB_DIR = path.join(RES, "app", "web", "apps", "web");
 const ENV_FILE = path.join(USER_DATA, "local.env");
+const PG_LOG = path.join(USER_DATA, "postgres.log"); // the first place to look if the database won't start
 
 const PG_PORT = 5433;
 const API_PORT = 4100;
@@ -60,7 +61,6 @@ const WEB_PORT = 3100;
 
 let mainWindow;
 let tray;
-let pgProcess;
 let apiProcess;
 let workerProcess;
 let webProcess;
@@ -148,23 +148,32 @@ async function initPgData() {
 }
 
 async function startPostgresAndWaitForPort() {
-  // Never `detached: true` here. On Windows that starts postgres with no console at
-  // all, and postgres spawns a new postgres.exe for every connection and background
-  // worker (no fork() on Windows) — each of which then gets its own brand new,
-  // visible console window. windowsHide alone gives the postmaster a hidden console
-  // that all of its children inherit, so none of them ever show a window.
-  pgProcess = spawn(
-    path.join(PG_BIN, "postgres.exe"),
-    ["-D", PG_DATA, "-p", String(PG_PORT), "-h", "0.0.0.0"],
-    { windowsHide: true, stdio: "ignore" }
-  );
-  // postgres needs a moment after the process starts before it accepts connections —
-  // poll with a raw TCP connect (see tcpPortOpen's comment — anything that spawns a
-  // process or hits Chromium's network stack here is unreliable on this machine) and
-  // a short interval, instead of spawning pg_isready.exe in a loop.
-  for (let i = 0; i < 100; i++) {
-    if (await tcpPortOpen(PG_PORT, "127.0.0.1", 300)) break;
-    await new Promise((r) => setTimeout(r, 150));
+  // Started through pg_ctl, Postgres's own supported Windows launcher — NOT by
+  // spawning postgres.exe directly. Confirmed live on this machine: the identical
+  // binary + data directory spawned directly from Electron accepted TCP connections
+  // but never answered a single query (even after a full wipe/reinit), while the same
+  // cluster started via `pg_ctl start` answered in ~150ms every time. pg_ctl sets up
+  // the process the way Postgres expects on Windows (its own job object, restricted
+  // token, stdin/stdout redirected to the log file).
+  //
+  // windowsHide gives pg_ctl a hidden console that cmd/postgres and every per-connection
+  // postgres.exe child inherit, so no console windows ever appear. stdio MUST be
+  // "ignore": with pipes, the long-running postmaster inherits them and runAsync's
+  // "close" event would never fire. -w waits until the server accepts connections.
+  await runAsync(path.join(PG_BIN, "pg_ctl.exe"), [
+    "start", "-D", PG_DATA, "-l", PG_LOG, "-w", "-t", "30",
+    "-o", `-p ${PG_PORT} -h 0.0.0.0`,
+  ], { stdio: "ignore", timeout: 40000 });
+}
+
+async function stopPostgres() {
+  // "fast" shutdown: a clean checkpoint, so the next launch doesn't start with crash
+  // recovery. (Killing the process instead is TerminateProcess on Windows — never clean.)
+  const result = await runAsync(path.join(PG_BIN, "pg_ctl.exe"), [
+    "stop", "-D", PG_DATA, "-m", "fast", "-w", "-t", "10",
+  ], { stdio: "ignore", timeout: 15000 });
+  if (result.status !== 0) {
+    await runAsync("taskkill.exe", ["/F", "/IM", "postgres.exe", "/T"], { stdio: "ignore", timeout: 5000 });
   }
 }
 
@@ -206,14 +215,9 @@ async function startBackend(onStatus) {
   while (!(await postgresIsAlive())) {
     attempt++;
     if (attempt > 4) break; // give up — startBackend's caller will surface the failure
-    if (wiped) {
+    if (wiped || attempt <= 2) {
       onStatus(`Database isn't responding — retrying (${attempt}/4)…`);
-      try { pgProcess.kill(); } catch {}
-      await new Promise((r) => setTimeout(r, 1500));
-      await startPostgresAndWaitForPort();
-    } else if (attempt <= 2) {
-      onStatus(`Database isn't responding — retrying (${attempt}/4)…`);
-      try { pgProcess.kill(); } catch {}
+      await stopPostgres();
       await new Promise((r) => setTimeout(r, 1500));
       await startPostgresAndWaitForPort();
     } else {
@@ -223,7 +227,7 @@ async function startBackend(onStatus) {
       // projects/tasks, so wiping and reinitializing a fresh, known-good cluster is
       // safe.
       onStatus(`Database needs to be reset — retrying (${attempt}/4)…`);
-      try { pgProcess.kill(); } catch {}
+      await stopPostgres();
       // killing the postmaster doesn't necessarily kill its worker subprocesses
       // (checkpointer, background writer, a stray EXEC_BACKEND connection handler)
       // immediately on Windows — any one of them still holding a file in PG_DATA
@@ -326,11 +330,9 @@ function stopBackend() {
   for (const p of [apiProcess, workerProcess, webProcess]) {
     try { p?.kill(); } catch {}
   }
-  if (pgProcess) {
-    // Graceful Postgres shutdown (SIGINT ~= "fast shutdown") so the data directory
-    // is never left in a torn state between app launches.
-    try { pgProcess.kill("SIGINT"); } catch {}
-  }
+  // pg_ctl runs the postmaster outside our own process tree, so it does not die with
+  // us — stop it explicitly (and cleanly) so the data directory is never left torn.
+  return stopPostgres();
 }
 
 function createWindow() {
@@ -457,7 +459,15 @@ app.on("window-all-closed", () => {
   // tray "Quit" sets app.isQuitting and actually exits.
 });
 
-app.on("before-quit", () => {
+let backendStopped = false;
+app.on("before-quit", (e) => {
   app.isQuitting = true;
-  stopBackend();
+  // A second launch quits right away (single-instance lock) — it must not touch the
+  // database: pg_ctl stop acts on the shared data directory, i.e. the FIRST
+  // instance's running server.
+  if (!gotSingleInstanceLock || backendStopped) return;
+  // Hold the quit until Postgres has shut down cleanly, then exit for real.
+  e.preventDefault();
+  backendStopped = true;
+  stopBackend().finally(() => app.exit(0));
 });
