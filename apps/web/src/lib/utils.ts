@@ -6,7 +6,15 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Reads the API base URL from the env var documented in .env.example. */
 export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api";
+  const value = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api";
+  // Building from Git Bash (MSYS) silently rewrites a POSIX-looking value like "/api"
+  // into a Windows path ("C:/Program Files/Git/api") before Next.js inlines it, and
+  // fetch() on that throws a TypeError that surfaces as "Could not reach the server"
+  // on every request. Recover the intended relative path if that happened.
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return "/" + value.split(/[\\/]/).filter(Boolean).pop();
+  }
+  return value;
 }
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {

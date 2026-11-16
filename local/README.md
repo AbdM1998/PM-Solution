@@ -61,6 +61,11 @@ the machine it was built on; the steps below regenerate it on a fresh machine.
      `API_INTERNAL_URL=http://127.0.0.1:4100` as environment variables — Next.js bakes
      both into the build output at build time, not at runtime. Getting this wrong
      produces a build that silently tries to reach the wrong API address.
+   - **If you build from Git Bash**, prefix the command with `MSYS_NO_PATHCONV=1`.
+     Otherwise MSYS rewrites `/api` into `C:/Program Files/Git/api` before Next.js
+     sees it, and every request from the app fails with "Could not reach the server"
+     even though the server is healthy (this exact bug shipped once). Check with
+     `grep -rl "Program Files/Git" apps/web/.next/static` — it must find nothing.
 5. **Compile `ProjectFlow.exe`** from `launcher.js` (a plain Node script — the same
    startup logic as `start.bat`, just in JS so it can be compiled):
    ```
