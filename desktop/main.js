@@ -140,39 +140,6 @@ async function waitForPort(port, timeoutMs = 30000) {
   return false;
 }
 
-// Marks which bundled migrations have already been applied to this machine's
-// database, so a normal launch can skip the slow one-time setup steps entirely
-// instead of redoing them every single time the app starts.
-const DB_INIT_MARKER = path.join(USER_DATA, "db-init.json");
-
-function bundledMigrationNames() {
-  const dir = path.join(API_DIR, "prisma", "migrations");
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-function readDbInitMarker() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_INIT_MARKER, "utf-8"));
-  } catch {
-    return null;
-  }
-}
-
-function writeDbInitMarker(migrations) {
-  try {
-    fs.writeFileSync(DB_INIT_MARKER, JSON.stringify({ migrations }));
-  } catch {
-    // non-fatal — worst case, the next launch just redoes the setup steps once
-  }
-}
-
 async function initPgData() {
   fs.mkdirSync(PG_DATA, { recursive: true });
   await runAsync(path.join(PG_BIN, "initdb.exe"), [
@@ -220,7 +187,7 @@ async function postgresIsAlive() {
 }
 
 async function startBackend(onStatus) {
-  let firstTimeInit = !fs.existsSync(path.join(PG_DATA, "PG_VERSION"));
+  const firstTimeInit = !fs.existsSync(path.join(PG_DATA, "PG_VERSION"));
   if (firstTimeInit) {
     onStatus("Setting up your local database for the first time…");
     await initPgData();
@@ -282,7 +249,6 @@ async function startBackend(onStatus) {
       }
       if (!removed) throw lastRmErr;
       await initPgData();
-      firstTimeInit = true;
       wiped = true;
       await startPostgresAndWaitForPort();
     }
@@ -291,44 +257,32 @@ async function startBackend(onStatus) {
   const secrets = loadOrCreateSecrets();
   const databaseUrl = `postgresql://projectflow@127.0.0.1:${PG_PORT}/projectflow`;
 
-  // The slow part of every launch used to be here unconditionally: spawning psql to
-  // check the database exists, then spawning the Prisma CLI (which itself is a slow
-  // cold start, easily 2-5s, worse under this machine's endpoint-security scanning of
-  // every new process) to run `migrate deploy` — every single time, even though both
-  // are no-ops after the very first successful run or after an unchanged update. Skip
-  // both entirely once a marker confirms this machine is already on the bundled
-  // migration set; only re-run them when that set actually changed (a real update) or
-  // on a genuinely fresh install.
-  const currentMigrations = bundledMigrationNames();
-  const marker = readDbInitMarker();
-  // A fresh initdb this run means a brand new, empty Postgres cluster — the
-  // "projectflow" database and its tables don't exist yet no matter what an old
-  // marker (which lives separately, outside PG_DATA) says. Treating it as "already
-  // up to date" would skip createdb/migrate entirely and leave the API unable to
-  // connect to a database that was never created — always redo setup after a fresh
-  // initdb.
-  const upToDate = !firstTimeInit && marker && JSON.stringify(marker.migrations) === JSON.stringify(currentMigrations);
-
-  if (!upToDate) {
-    const dbCheck = await runAsync(path.join(PG_BIN, "psql.exe"), [
-      "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres",
-      "-tAc", "SELECT 1 FROM pg_database WHERE datname='projectflow'",
+  // This used to be skipped on repeat launches (tracked via a marker file) to save
+  // the few seconds createdb/migrate deploy cost. Removed: the marker lives outside
+  // PG_DATA, so whenever the data directory got rebuilt out from under it — the
+  // auto-recovery wipe above, or a manual reset while debugging — the marker still
+  // said "already up to date" and this got skipped on a database that was actually
+  // missing tables (confirmed live: WorkerHeartbeat didn't exist, because a prior
+  // recovery cycle's migrate deploy never got a chance to run before the marker was
+  // trusted). createdb and migrate deploy are safely idempotent — running them on an
+  // already-up-to-date database is a fast no-op — so always running them is strictly
+  // safer than trying to detect when it's safe to skip.
+  const dbCheck = await runAsync(path.join(PG_BIN, "psql.exe"), [
+    "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "-d", "postgres",
+    "-tAc", "SELECT 1 FROM pg_database WHERE datname='projectflow'",
+  ], { timeout: 10000 });
+  if (!dbCheck.stdout?.toString().includes("1")) {
+    onStatus("Creating application database…");
+    await runAsync(path.join(PG_BIN, "createdb.exe"), [
+      "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "projectflow",
     ], { timeout: 10000 });
-    if (!dbCheck.stdout?.toString().includes("1")) {
-      onStatus("Creating application database…");
-      await runAsync(path.join(PG_BIN, "createdb.exe"), [
-        "-h", "127.0.0.1", "-p", String(PG_PORT), "-U", "projectflow", "projectflow",
-      ], { timeout: 10000 });
-    }
-
-    onStatus("Applying database updates…");
-    await runAsync(process.execPath, [
-      path.join(API_DIR, "node_modules", "prisma", "build", "index.js"),
-      "migrate", "deploy", "--schema", path.join("prisma", "schema.prisma"),
-    ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl }, timeout: 30000 });
-
-    writeDbInitMarker(currentMigrations);
   }
+
+  onStatus("Applying database updates…");
+  await runAsync(process.execPath, [
+    path.join(API_DIR, "node_modules", "prisma", "build", "index.js"),
+    "migrate", "deploy", "--schema", path.join("prisma", "schema.prisma"),
+  ], { cwd: API_DIR, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", DATABASE_URL: databaseUrl }, timeout: 30000 });
 
   const lanIp = findLanIp();
 
