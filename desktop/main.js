@@ -22,6 +22,27 @@ const net = require("net");
 // so just disable proxying for the whole app outright.
 app.commandLine.appendSwitch("no-proxy-server");
 
+// Without this, double-clicking the desktop icon twice (an easy mistake — the app
+// takes a few seconds to appear, so a second click while waiting looks like nothing
+// happened) launches a second full instance that fights the first one over the exact
+// same Postgres data directory, the exact same ports (5433/4100/3100), and the exact
+// same postgres.exe process name — this was a real, observed contributor to the
+// "works sometimes, randomly doesn't" symptom, not just the endpoint-security
+// interference. Only the first instance proceeds past this point; any later launch
+// quits immediately after asking the first instance to focus its window instead.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 // app.isPackaged is false when running via `electron .` in dev, true inside the
 // built installer — resourcesPath only exists/matters in the packaged app.
 const RES = app.isPackaged ? process.resourcesPath : path.join(__dirname, "resources");
@@ -242,15 +263,24 @@ async function startBackend(onStatus) {
       // safe.
       onStatus(`Database needs to be reset — retrying (${attempt}/4)…`);
       try { pgProcess.kill(); } catch {}
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        fs.rmSync(PG_DATA, { recursive: true, force: true });
-      } catch {
-        // A lingering file handle from the just-killed process can make the first
-        // attempt fail — give Windows a moment to release it and try once more.
-        await new Promise((r) => setTimeout(r, 3000));
-        fs.rmSync(PG_DATA, { recursive: true, force: true });
+      // killing the postmaster doesn't necessarily kill its worker subprocesses
+      // (checkpointer, background writer, a stray EXEC_BACKEND connection handler)
+      // immediately on Windows — any one of them still holding a file in PG_DATA
+      // open is enough to make the rmSync below fail with EBUSY. Kill every
+      // postgres.exe this app owns, not just the one handle we tracked.
+      await runAsync("taskkill.exe", ["/F", "/IM", "postgres.exe", "/T"], { timeout: 5000 });
+      let removed = false;
+      let lastRmErr;
+      for (let i = 0; i < 4 && !removed; i++) {
+        await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+        try {
+          fs.rmSync(PG_DATA, { recursive: true, force: true });
+          removed = true;
+        } catch (e) {
+          lastRmErr = e;
+        }
       }
+      if (!removed) throw lastRmErr;
       await initPgData();
       firstTimeInit = true;
       wiped = true;
@@ -397,6 +427,7 @@ function loadSplash(win) {
   );
 }
 
+if (gotSingleInstanceLock) {
 app.whenReady().then(async () => {
   const win = createWindow();
   loadSplash(win);
@@ -471,6 +502,7 @@ app.whenReady().then(async () => {
     else mainWindow.show();
   });
 });
+} // end if (gotSingleInstanceLock)
 
 app.on("window-all-closed", () => {
   // Don't quit on window close (see the close handler above) — only an explicit
