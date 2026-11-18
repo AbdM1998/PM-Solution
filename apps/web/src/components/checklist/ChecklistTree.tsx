@@ -17,6 +17,7 @@ import {
   useDeleteChecklistItem,
   useReorderChecklistItems,
 } from "@/hooks/useChecklist";
+import { errorMessage } from "@/lib/utils";
 import { ChecklistLevel, ROOT_KEY } from "./ChecklistLevel";
 import { TemplatePickerModal } from "./TemplatePickerModal";
 
@@ -41,23 +42,29 @@ export function ChecklistTree({ taskId }: { taskId: string }) {
     return map;
   }, [items]);
 
+  const [actionError, setActionError] = useState<unknown>(null);
+  const total = items?.length ?? 0;
+  const completed = items?.filter((i) => i.status === "COMPLETED").length ?? 0;
+
   function handleToggle(item: ChecklistItem) {
     setPendingToggleId(item.id);
+    setActionError(null);
     const done = () => setPendingToggleId(undefined);
     if (item.status === "COMPLETED") {
-      updateItem.mutate({ id: item.id, data: { status: "PENDING" } }, { onSettled: done });
+      updateItem.mutate({ id: item.id, data: { status: "PENDING" } }, { onSettled: done, onError: setActionError });
     } else {
-      completeItem.mutate(item.id, { onSettled: done });
+      completeItem.mutate(item.id, { onSettled: done, onError: setActionError });
     }
   }
 
   function handleDelete(item: ChecklistItem) {
     setPendingDeleteId(item.id);
-    deleteItem.mutate(item.id, { onSettled: () => setPendingDeleteId(undefined) });
+    deleteItem.mutate(item.id, { onSettled: () => setPendingDeleteId(undefined), onError: setActionError });
   }
 
   function handleAddChild(parentId: string, title: string) {
-    createItem.mutate({ title, parentId });
+    setActionError(null);
+    createItem.mutate({ title, parentId }, { onError: setActionError });
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -83,7 +90,19 @@ export function ChecklistTree({ taskId }: { taskId: string }) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Checklist</h4>
+        <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+          Checklist{" "}
+          {total > 0 && (
+            <span className={completed === total ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}>
+              {completed}/{total}
+            </span>
+          )}
+          {total > completed && (
+            <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+              — complete all items to close the task
+            </span>
+          )}
+        </h4>
         <Button size="sm" variant="ghost" onClick={() => setTemplateOpen(true)}>
           <LayoutTemplate size={14} /> From template
         </Button>
@@ -105,9 +124,17 @@ export function ChecklistTree({ taskId }: { taskId: string }) {
       <InlineAdd
         placeholder="Add a checklist item…"
         pending={createItem.isPending}
-        onAdd={(title) => createItem.mutate({ title })}
+        onAdd={(title) => {
+          setActionError(null);
+          createItem.mutate({ title }, { onError: setActionError });
+        }}
         className="mt-1"
       />
+      {actionError ? (
+        <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-400">
+          {errorMessage(actionError)}
+        </p>
+      ) : null}
 
       <TemplatePickerModal open={templateOpen} onClose={() => setTemplateOpen(false)} taskId={taskId} />
     </div>

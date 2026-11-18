@@ -4,9 +4,11 @@ import { env } from "./lib/env";
 import { logger } from "./lib/logger";
 import { prisma } from "./lib/prisma";
 import { initSocketGateway } from "./modules/notifications/socket";
+import { ensureBootstrapAdmin } from "./modules/auth/service";
 
 async function main() {
   await prisma.$connect();
+  await ensureBootstrapAdmin();
 
   const app = createApp();
   const httpServer = http.createServer(app);

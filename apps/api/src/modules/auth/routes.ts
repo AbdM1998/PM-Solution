@@ -33,6 +33,13 @@ function setRefreshCookie(res: import("express").Response, token: string) {
   });
 }
 
+authRouter.get(
+  "/config",
+  asyncHandler(async (_req, res) => {
+    res.json(await authService.getAuthConfig());
+  })
+);
+
 authRouter.post(
   "/register",
   validateBody(RegisterInput),

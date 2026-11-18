@@ -54,6 +54,7 @@ const TABLES = [
   "ChecklistTemplate",
   "TaskTag",
   "Task",
+  "ProjectStage",
   "ProjectTag",
   "ProjectMember",
   "Tag",

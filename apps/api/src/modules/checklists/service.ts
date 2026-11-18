@@ -29,8 +29,17 @@ export async function listChecklistItems(userId: string, taskId: string) {
   return items.map(toWireChecklistItem);
 }
 
+/** A DONE task must never end up with open checklist items (closing it required them
+ * all to be completed), so adding or reopening items needs the task reopened first. */
+function assertTaskOpen(task: { status: string; title: string }) {
+  if (task.status === "DONE") {
+    throw new AppError(409, "TASK_CLOSED", `Task "${task.title}" is closed — reopen it before changing its checklist`);
+  }
+}
+
 export async function createChecklistItem(userId: string, taskId: string, input: CreateChecklistItemInput) {
-  await assertTaskAccess(userId, taskId);
+  const task = await assertTaskAccess(userId, taskId);
+  assertTaskOpen(task);
   if (input.parentId) {
     const parent = await prisma.checklistItem.findUnique({ where: { id: input.parentId } });
     if (!parent || parent.taskId !== taskId) throw AppError.badRequest("parentId must belong to the same task");
@@ -52,10 +61,11 @@ export async function createChecklistItem(userId: string, taskId: string, input:
 }
 
 export async function updateChecklistItem(userId: string, itemId: string, input: UpdateChecklistItemInput) {
-  const { item: existing } = await assertChecklistItemAccess(userId, itemId);
+  const { item: existing, task } = await assertChecklistItemAccess(userId, itemId);
 
   const becomingCompleted = input.status === "COMPLETED" && existing.status !== "COMPLETED";
   const becomingReopened = input.status === "PENDING" && existing.status === "COMPLETED";
+  if (becomingReopened) assertTaskOpen(task);
   const newDueDate = input.dueDate !== undefined ? (input.dueDate ? new Date(input.dueDate) : null) : undefined;
 
   if (input.parentId) {
@@ -192,7 +202,8 @@ export async function createChecklistTemplate(userId: string, input: CreateCheck
 }
 
 export async function applyChecklistTemplate(userId: string, templateId: string, taskId: string) {
-  await assertTaskAccess(userId, taskId);
+  const task = await assertTaskAccess(userId, taskId);
+  assertTaskOpen(task);
   const template = await prisma.checklistTemplate.findUnique({
     where: { id: templateId },
     include: { items: { orderBy: { orderIndex: "asc" } } },

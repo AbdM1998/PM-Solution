@@ -30,13 +30,20 @@ export const WORKER_ID = `worker-${process.pid}-${randomUUID().slice(0, 8)}`;
  * of every status value — this is the one place that was ambiguous enough to need a
  * documented judgment call.
  */
+// Prisma stores DateTime columns as `timestamp(3)` WITHOUT time zone, always in UTC.
+// Bare now() is converted to the database SERVER's time zone when compared with such a
+// column — fine on a UTC server (Docker), but on a server set to local time (the
+// desktop app's bundled Postgres, e.g. +03) it made reminders fire 3 hours early and
+// fresh locks look stale. Always compare/write in UTC explicitly.
+const NOW_UTC = Prisma.raw(`(now() AT TIME ZONE 'UTC')`);
+
 export async function claimDueOccurrences(batchSize = env.workerBatchSize): Promise<ReminderOccurrence[]> {
   return prisma.$queryRaw<ReminderOccurrence[]>(Prisma.sql`
     UPDATE "ReminderOccurrence"
-    SET status = 'PROCESSING', "lockedBy" = ${WORKER_ID}, "lockedAt" = now(), "updatedAt" = now()
+    SET status = 'PROCESSING', "lockedBy" = ${WORKER_ID}, "lockedAt" = ${NOW_UTC}, "updatedAt" = ${NOW_UTC}
     WHERE id IN (
       SELECT id FROM "ReminderOccurrence"
-      WHERE status IN ('PENDING', 'SNOOZED') AND "nextFireAt" <= now()
+      WHERE status IN ('PENDING', 'SNOOZED') AND "nextFireAt" <= ${NOW_UTC}
       ORDER BY "nextFireAt"
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
@@ -66,7 +73,7 @@ export async function reclaimStaleLocks(staleAfterMinutes = 5): Promise<number> 
   const result = await prisma.$executeRaw`
     UPDATE "ReminderOccurrence"
     SET status = 'PENDING', "lockedBy" = NULL, "lockedAt" = NULL
-    WHERE status = 'PROCESSING' AND "lockedAt" < now() - (${staleAfterMinutes}::text || ' minutes')::interval
+    WHERE status = 'PROCESSING' AND "lockedAt" < ${NOW_UTC} - (${staleAfterMinutes}::text || ' minutes')::interval
   `;
   return result;
 }
@@ -91,7 +98,8 @@ export async function processOneOccurrence(occurrence: ReminderOccurrence, now: 
     userEmail: user.email,
     userName: user.name,
     targetEmail: reminder.targetEmail ?? user.email,
-    targetWhatsappNumber: reminder.targetWhatsappNumber,
+    // Per-reminder override first, then the account's own WhatsApp number (set by an admin).
+    targetWhatsappNumber: reminder.targetWhatsappNumber ?? user.whatsappNumber,
     entityType: reminder.entityType,
     entityId: reminder.entityId,
     entityTitle: ctx.title,

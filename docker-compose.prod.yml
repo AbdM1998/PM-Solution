@@ -1,0 +1,107 @@
+# ProjectFlow — PRODUCTION stack for a single Linux server (e.g. a GoDaddy VPS).
+# Full walkthrough: deploy/GODADDY.md
+#
+#   cp deploy/.env.production.example .env      # then fill it in
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from the dev docker-compose.yml:
+#   - Postgres is NOT published on any host port (only reachable inside this network).
+#   - api and web are published on 127.0.0.1 only — Nginx on the host is the single
+#     public entry point (HTTPS), see deploy/nginx/projectflow.conf.
+#   - NODE_ENV=production (secure cookies), TRUST_PROXY=1 (real client IPs behind Nginx).
+#   - Uploaded files and the database live in named volumes that survive rebuilds.
+
+name: projectflow
+
+networks:
+  projectflow-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  api_storage:
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - projectflow-net
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: projectflow-api:prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      TRUST_PROXY: 1
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # Applies pending migrations (no-op when up to date), then starts the API. The API
+    # also creates the ADMIN_EMAIL account on first start (see .env).
+    command: sh -c "/repo/node_modules/.bin/prisma migrate deploy && node dist/server.js"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - api_storage:/repo/apps/api/storage
+    ports:
+      - "127.0.0.1:4000:4000"
+    networks:
+      - projectflow-net
+
+  worker:
+    image: projectflow-api:prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: node dist/worker-entry.js
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - api_storage:/repo/apps/api/storage
+    healthcheck:
+      disable: true
+    networks:
+      - projectflow-net
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api
+    image: projectflow-web:prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - projectflow-net

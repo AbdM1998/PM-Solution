@@ -12,6 +12,8 @@ import { ProjectStatsBar } from "@/components/projects/ProjectStatsBar";
 import { ProjectActivity } from "@/components/projects/ProjectActivity";
 import { ProjectForm } from "@/components/projects/ProjectForm";
 import { TaskList } from "@/components/tasks/TaskList";
+import { LifecycleManager, LifecycleStepper } from "@/components/projects/ProjectLifecycle";
+import { ProjectFiles } from "@/components/projects/ProjectFiles";
 import { ReminderPanel } from "@/components/reminders/ReminderPanel";
 import { useProject, useUpdateProject, useDeleteProject } from "@/hooks/useProjects";
 
@@ -56,9 +58,13 @@ export default function ProjectDetailPage() {
         <ProjectStatsBar project={project} />
       </div>
 
+      <LifecycleStepper projectId={project.id} onManage={() => setTab("lifecycle")} />
+
       <Tabs
         tabs={[
           { id: "tasks", label: "Tasks" },
+          { id: "lifecycle", label: "Lifecycle" },
+          { id: "files", label: "Files" },
           { id: "reminders", label: "Reminders" },
           { id: "activity", label: "Activity" },
         ]}
@@ -67,6 +73,8 @@ export default function ProjectDetailPage() {
       />
 
       {tab === "tasks" && <TaskList projectId={project.id} />}
+      {tab === "lifecycle" && <LifecycleManager projectId={project.id} />}
+      {tab === "files" && <ProjectFiles projectId={project.id} />}
       {tab === "reminders" && <ReminderPanel entityType="PROJECT" entityId={project.id} />}
       {tab === "activity" && <ProjectActivity projectId={project.id} />}
 

@@ -110,6 +110,12 @@ COPY --from=builder --chown=apiuser:nodejs /repo/package.json ./package.json
 COPY --from=builder --chown=apiuser:nodejs /repo/packages/shared ./packages/shared
 COPY --from=builder --chown=apiuser:nodejs /repo/apps/api ./apps/api
 
+# Uploaded files live here (STORAGE_ROOT defaults to ./storage). It must exist in the
+# image owned by apiuser: a named volume mounted on it copies this ownership on first
+# use — without it Docker creates the mount point as root and every upload fails with
+# EACCES, since the process runs as the unprivileged apiuser.
+RUN mkdir -p /repo/apps/api/storage && chown apiuser:nodejs /repo/apps/api/storage
+
 WORKDIR /repo/apps/api
 USER apiuser
 

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CreateTaskInput, UpdateTaskInput, PriorityEnum, TaskStatusEnum } from "@projectflow/shared";
-import type { Task } from "@projectflow/shared";
+import type { ProjectStage, Task } from "@projectflow/shared";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Select, Textarea, FieldError } from "@/components/ui/Input";
@@ -22,6 +22,8 @@ export function TaskForm({
   onSubmit,
   submitting,
   submitError,
+  stages = [],
+  defaultStageId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,8 +31,11 @@ export function TaskForm({
   onSubmit: (data: Record<string, unknown>) => void;
   submitting: boolean;
   submitError?: unknown;
+  stages?: ProjectStage[];
+  defaultStageId?: string;
 }) {
   const isEdit = !!task;
+  const [stageId, setStageId] = useState(task ? task.stageId ?? "" : defaultStageId ?? "");
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
   const [priority, setPriority] = useState(task?.priority ?? "MEDIUM");
@@ -50,6 +55,7 @@ export function TaskForm({
       dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
       notes: notes || undefined,
     };
+    if (stages.length > 0) payload.stageId = stageId || null;
     if (isEdit) payload.status = status;
 
     const schema = isEdit ? UpdateTaskInput : CreateTaskInput;
@@ -112,6 +118,20 @@ export function TaskForm({
             </div>
           )}
         </div>
+        {stages.length > 0 && (
+          <div>
+            <Label htmlFor="tf-stage">Lifecycle stage</Label>
+            <Select id="tf-stage" value={stageId} onChange={(e) => setStageId(e.target.value)}>
+              <option value="">No stage</option>
+              {stages.map((s) => (
+                <option key={s.id} value={s.id} disabled={s.state === "COMPLETED" && s.id !== task?.stageId}>
+                  {s.name}
+                  {s.state === "COMPLETED" ? " (completed)" : s.state === "ACTIVE" ? " (active)" : ""}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <div>
           <Label htmlFor="tf-notes">Notes</Label>
           <Textarea id="tf-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

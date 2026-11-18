@@ -31,6 +31,15 @@ export const env = {
   jwtAccessTtl: optional("JWT_ACCESS_TTL", "15m"),
   refreshTokenTtl: optional("REFRESH_TOKEN_TTL", "30d"),
 
+  // false on a public server: nobody can self-register; the admin creates accounts.
+  // The very first account can still register on an empty database (bootstrap).
+  allowRegistration: optional("ALLOW_REGISTRATION", "true").toLowerCase() !== "false",
+  // Optional bootstrap admin, created on API start if no account with that email
+  // exists yet (and promoted to admin if it does). Used for server deployments.
+  adminEmail: optional("ADMIN_EMAIL"),
+  adminPassword: optional("ADMIN_PASSWORD"),
+  adminName: optional("ADMIN_NAME", "Administrator"),
+
   webOrigin: optional("WEB_ORIGIN", "http://localhost:3000"),
   mobileOrigin: optional("MOBILE_ORIGIN", "http://localhost:19006"),
 
@@ -59,6 +68,13 @@ export const env = {
   whatsappPhoneNumberId: optional("WHATSAPP_PHONE_NUMBER_ID"),
   whatsappAccessToken: optional("WHATSAPP_ACCESS_TOKEN"),
   whatsappVerifyToken: optional("WHATSAPP_VERIFY_TOKEN"),
+  // Business-initiated WhatsApp messages (reminders) must use an APPROVED template —
+  // free-form text is only delivered inside the 24h window after the user messaged you.
+  // Set WHATSAPP_TEMPLATE_NAME to a template whose body has two variables
+  // ({{1}} = title, {{2}} = message). Empty = send plain text (works only in that window).
+  whatsappTemplateName: optional("WHATSAPP_TEMPLATE_NAME"),
+  whatsappTemplateLang: optional("WHATSAPP_TEMPLATE_LANG", "en"),
+  whatsappApiUrl: optional("WHATSAPP_API_URL", "https://graph.facebook.com/v20.0"),
 
   webPushVapidPublicKey: optional("WEBPUSH_VAPID_PUBLIC_KEY"),
   webPushVapidPrivateKey: optional("WEBPUSH_VAPID_PRIVATE_KEY"),

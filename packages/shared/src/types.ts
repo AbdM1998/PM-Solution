@@ -18,6 +18,12 @@ export interface User {
   name: string;
   timezone: string;
   isAdmin: boolean;
+  whatsappNumber?: string | null;
+}
+
+export interface AuthConfig {
+  /** false when ALLOW_REGISTRATION=false — accounts are created by an admin only. */
+  registrationOpen: boolean;
 }
 
 export interface AdminUser {
@@ -25,14 +31,81 @@ export interface AdminUser {
   email: string;
   name: string;
   isAdmin: boolean;
+  isActive: boolean;
+  whatsappNumber: string | null;
   createdAt: string;
   projectCount: number;
   taskCount: number;
 }
 
 export interface IntegrationsStatus {
-  email: { configured: boolean; from: string | null };
+  email: { configured: boolean; from: string | null; host: string | null };
   whatsapp: { configured: boolean };
+}
+
+export type StageState = "COMPLETED" | "ACTIVE" | "LOCKED";
+
+export interface ProjectStage {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  orderIndex: number;
+  completedAt?: string | null;
+  state: StageState;
+  taskCount: number;
+  /** DONE or CANCELLED — what counts toward unlocking the next stage. */
+  closedTaskCount: number;
+}
+
+export interface Attachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  projectId: string | null;
+  projectName?: string | null;
+  taskId: string | null;
+  taskTitle?: string | null;
+  uploadedById: string | null;
+  uploadedByName?: string | null;
+  createdAt: string;
+}
+
+export interface AdminReminder {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerEmail: string;
+  entityType: ReminderEntityType;
+  entityId: string;
+  entityTitle: string;
+  projectId: string;
+  projectName: string;
+  type: ReminderType;
+  channels: ReminderChannel[];
+  isActive: boolean;
+  targetEmail: string | null;
+  targetWhatsappNumber: string | null;
+  nextFireAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminDelivery {
+  id: string;
+  channel: ReminderChannel;
+  status: "PENDING" | "SENT" | "FAILED";
+  simulated: boolean;
+  target: string | null;
+  title: string | null;
+  error: string | null;
+  attemptedAt: string;
+}
+
+export interface TestNotificationResult {
+  ok: boolean;
+  simulated: boolean;
+  detail: string;
 }
 
 export interface ReportsSummary {
@@ -103,6 +176,7 @@ export interface Task {
   dueDate?: string | null;
   completedAt?: string | null;
   assignedUserId?: string | null;
+  stageId?: string | null;
   orderIndex: number;
   notes?: string | null;
   createdAt: string;

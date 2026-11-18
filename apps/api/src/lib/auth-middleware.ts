@@ -33,7 +33,16 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction) {
 }
 
 export async function requireAdmin(req: Request, _res: Response, next: NextFunction) {
-  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
-  if (!user?.isAdmin) return next(AppError.forbidden("Admin access required"));
-  next();
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user?.isAdmin || !user.isActive) return next(AppError.forbidden("Admin access required"));
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function isAdminUser(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { isAdmin: true, isActive: true } });
+  return !!user?.isAdmin && user.isActive;
 }

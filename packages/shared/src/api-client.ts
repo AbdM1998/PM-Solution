@@ -3,6 +3,7 @@ import type {
   DashboardSummary, MyDay, PaginatedResult, User, EmailThread, EmailMessage,
   Tag, ActivityEntry, AppNotification, DevicePlatform, BoardTask,
   AdminUser, IntegrationsStatus, ReportsSummary,
+  AuthConfig, ProjectStage, Attachment, AdminReminder, AdminDelivery, TestNotificationResult,
 } from "./types";
 
 export interface ApiClientOptions {
@@ -54,6 +55,12 @@ export class ApiClient {
   }
 
   private async doRequest<T>(path: string, init: RequestInit): Promise<T> {
+    const res = await this.fetchChecked(path, init);
+    if (res.status === 204) return undefined as T;
+    return res.json() as Promise<T>;
+  }
+
+  private async fetchChecked(path: string, init: RequestInit): Promise<Response> {
     const res = await fetch(`${this.opts.baseUrl}${path}`, init);
     if (res.status === 401) {
       this.opts.onUnauthorized?.();
@@ -62,7 +69,17 @@ export class ApiClient {
       const body = await res.json().catch(() => undefined);
       throw new ApiError(res.status, (body as any)?.message ?? res.statusText, body);
     }
-    if (res.status === 204) return undefined as T;
+    return res;
+  }
+
+  private authHeader(): Record<string, string> {
+    const token = this.opts.getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  /** multipart/form-data upload — no JSON Content-Type, the browser sets the boundary. */
+  private async upload<T>(path: string, form: FormData): Promise<T> {
+    const res = await this.fetchChecked(path, { method: "POST", body: form, headers: this.authHeader() });
     return res.json() as Promise<T>;
   }
 
@@ -81,6 +98,9 @@ export class ApiClient {
   }
   me() {
     return this.request<User>("/auth/me");
+  }
+  authConfig() {
+    return this.request<AuthConfig>("/auth/config");
   }
   // ADDED (apps/web, 2026-11-07): documented in docs/API_DESIGN.md ("POST /auth/refresh"
   // / "POST /auth/logout") but had no ApiClient methods. Needed so the web app can give
@@ -272,18 +292,95 @@ export class ApiClient {
     return this.request<void>("/notifications/read-all", { method: "POST" });
   }
 
+  // ---- Project lifecycle (stages) ----
+  listStages(projectId: string) {
+    return this.request<ProjectStage[]>(`/projects/${projectId}/stages`);
+  }
+  createStage(projectId: string, data: { name: string; description?: string }) {
+    return this.request<ProjectStage>(`/projects/${projectId}/stages`, { method: "POST", body: JSON.stringify(data) });
+  }
+  applyStagePreset(projectId: string, preset: string) {
+    return this.request<ProjectStage[]>(`/projects/${projectId}/stages/preset`, {
+      method: "POST",
+      body: JSON.stringify({ preset }),
+    });
+  }
+  updateStage(projectId: string, stageId: string, data: { name?: string; description?: string }) {
+    return this.request<ProjectStage>(`/projects/${projectId}/stages/${stageId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+  deleteStage(projectId: string, stageId: string) {
+    return this.request<void>(`/projects/${projectId}/stages/${stageId}`, { method: "DELETE" });
+  }
+  reorderStages(projectId: string, items: { stageId: string; newIndex: number }[]) {
+    return this.request<ProjectStage[]>(`/projects/${projectId}/stages/reorder`, {
+      method: "POST",
+      body: JSON.stringify(items),
+    });
+  }
+  advanceStage(projectId: string) {
+    return this.request<ProjectStage[]>(`/projects/${projectId}/stages/advance`, { method: "POST" });
+  }
+
+  // ---- Attachments (files) ----
+  listAttachments(projectId: string) {
+    return this.request<Attachment[]>(`/projects/${projectId}/attachments`);
+  }
+  uploadAttachment(projectId: string, file: File | Blob, fileName: string, taskId?: string) {
+    const form = new FormData();
+    form.append("file", file, fileName);
+    if (taskId) form.append("taskId", taskId);
+    return this.upload<Attachment>(`/projects/${projectId}/attachments`, form);
+  }
+  async downloadAttachment(id: string): Promise<Blob> {
+    const res = await this.fetchChecked(`/attachments/${id}/download`, { headers: this.authHeader() });
+    return res.blob();
+  }
+  deleteAttachment(id: string) {
+    return this.request<void>(`/attachments/${id}`, { method: "DELETE" });
+  }
+
   // ---- Admin ----
   listAdminUsers() {
     return this.request<AdminUser[]>("/admin/users");
   }
+  createAdminUser(data: { name: string; email: string; password: string; isAdmin?: boolean; whatsappNumber?: string }) {
+    return this.request<AdminUser>("/admin/users", { method: "POST", body: JSON.stringify(data) });
+  }
+  updateAdminUser(
+    id: string,
+    data: { name?: string; isAdmin?: boolean; isActive?: boolean; whatsappNumber?: string | null; password?: string }
+  ) {
+    return this.request<void>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
   setUserAdmin(id: string, isAdmin: boolean) {
-    return this.request<void>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ isAdmin }) });
+    return this.updateAdminUser(id, { isAdmin });
   }
   deleteAdminUser(id: string) {
     return this.request<void>(`/admin/users/${id}`, { method: "DELETE" });
   }
   getIntegrationsStatus() {
     return this.request<IntegrationsStatus>("/admin/integrations");
+  }
+  listAdminReminders() {
+    return this.request<AdminReminder[]>("/admin/reminders");
+  }
+  setAdminReminderActive(id: string, isActive: boolean) {
+    return this.request<void>(`/admin/reminders/${id}`, { method: "PATCH", body: JSON.stringify({ isActive }) });
+  }
+  listAdminDeliveries() {
+    return this.request<AdminDelivery[]>("/admin/deliveries");
+  }
+  sendTestNotification(channel: "EMAIL" | "WHATSAPP", to: string) {
+    return this.request<TestNotificationResult>("/admin/test-notification", {
+      method: "POST",
+      body: JSON.stringify({ channel, to }),
+    });
+  }
+  listAdminAttachments() {
+    return this.request<Attachment[]>("/admin/attachments");
   }
 
   // ---- Reports ----

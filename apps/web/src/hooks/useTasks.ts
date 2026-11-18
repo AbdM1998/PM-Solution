@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/lib/auth-context";
@@ -20,6 +20,7 @@ export function useCreateTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["stages", projectId] });
     },
   });
 }
@@ -32,6 +33,7 @@ export function useUpdateTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["stages", projectId] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
@@ -45,6 +47,7 @@ export function useDeleteTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["stages", projectId] });
     },
   });
 }
@@ -57,6 +60,7 @@ export function useBulkCompleteTasks(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks", projectId] });
       qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["stages", projectId] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });

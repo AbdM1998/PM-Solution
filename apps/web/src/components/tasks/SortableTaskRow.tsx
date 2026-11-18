@@ -5,7 +5,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, ChevronDown, ChevronRight, GripVertical, Pencil, Trash2 } from "lucide-react";
 import type { Task } from "@projectflow/shared";
-import { PriorityBadge, TaskStatusBadge } from "@/components/ui/Badge";
+import { Badge, PriorityBadge, TaskStatusBadge } from "@/components/ui/Badge";
 import { ChecklistTree } from "@/components/checklist/ChecklistTree";
 import { ReminderPanel } from "@/components/reminders/ReminderPanel";
 import { cn, formatDateTime, isPast } from "@/lib/utils";
@@ -19,7 +19,9 @@ export function SortableTaskRow({
   onDelete,
   toggling,
   deleting,
+  stageName,
 }: {
+  stageName?: string;
   task: Task;
   selected: boolean;
   onSelectChange: (checked: boolean) => void;
@@ -94,6 +96,11 @@ export function SortableTaskRow({
           </span>
         </button>
 
+        {stageName && (
+          <Badge tone="accent" className="hidden max-w-[9rem] truncate sm:inline-flex">
+            {stageName}
+          </Badge>
+        )}
         <TaskStatusBadge status={task.status} />
         <PriorityBadge priority={task.priority} />
         {task.dueDate && (

@@ -45,19 +45,40 @@ export const whatsappChannel: ChannelAdapter = {
 
     // Real call path — exercised only once credentials exist. Not reachable in this
     // session's tests (no real account), per the honesty rule in TECHNOLOGY_DECISIONS.md.
+    const to = payload.targetWhatsappNumber.replace(/^\+/, "");
+    const message = env.whatsappTemplateName
+      ? {
+          messaging_product: "whatsapp",
+          to,
+          type: "template",
+          template: {
+            name: env.whatsappTemplateName,
+            language: { code: env.whatsappTemplateLang },
+            components: [
+              {
+                type: "body",
+                parameters: [
+                  { type: "text", text: payload.title.slice(0, 1000) },
+                  { type: "text", text: payload.message.replace(/\s*\n\s*/g, " ").slice(0, 1000) },
+                ],
+              },
+            ],
+          },
+        }
+      : {
+          messaging_product: "whatsapp",
+          to,
+          type: "text",
+          text: { body: `${payload.title}\n${payload.message}` },
+        };
     try {
-      const res = await fetch(`https://graph.facebook.com/v20.0/${env.whatsappPhoneNumberId}/messages`, {
+      const res = await fetch(`${env.whatsappApiUrl}/${env.whatsappPhoneNumberId}/messages`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${env.whatsappAccessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: payload.targetWhatsappNumber,
-          type: "text",
-          text: { body: `${payload.title}\n${payload.message}` },
-        }),
+        body: JSON.stringify(message),
       });
       const body = await res.json();
       if (!res.ok) return { ok: false, error: `WhatsApp API ${res.status}`, providerResponse: body };

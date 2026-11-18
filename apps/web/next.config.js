@@ -10,6 +10,14 @@ const nextConfig = {
   // Don't auto-generate apps/web/AGENTS.md on every `next dev` — this app already
   // follows the org's own AGENTS.md/architecture conventions at the repo root.
   agentRules: false,
+  experimental: {
+    // Request bodies that pass through the /api rewrite below are buffered by Next.js
+    // with a 10MB default cap — larger uploads were cut off ("socket hang up" → 500)
+    // even though the API itself accepts files up to 25MB. Found by uploading a 12MB
+    // file through the web origin. Slightly above the API's own 25MB limit so the API
+    // (not this proxy) is what rejects oversize files, with a readable message.
+    proxyClientMaxBodySize: "30mb",
+  },
   // Server-side proxy for the backend API. Lets the browser always call a relative
   // same-origin "/api/*" path (see NEXT_PUBLIC_API_BASE_URL=/api) instead of an
   // absolute host:port that only resolves correctly from this one machine — needed

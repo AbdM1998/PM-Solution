@@ -1,6 +1,7 @@
 import type { Prisma, Task } from "@prisma/client";
 import type { CreateTaskInput, UpdateTaskInput } from "@projectflow/shared";
 import { prisma } from "../../lib/prisma";
+import { AppError } from "../../lib/error-handler";
 import { assertProjectAccess, assertTaskAccess } from "../../lib/access";
 import { parsePagination, toSkipTake } from "../../lib/pagination";
 import { cancelPendingOccurrencesForEntity, rescheduleRelativeOccurrences } from "../reminders/service";
@@ -17,6 +18,7 @@ export function toWireTask(task: Task) {
     dueDate: task.dueDate?.toISOString() ?? null,
     completedAt: task.completedAt?.toISOString() ?? null,
     assignedUserId: task.assignedUserId,
+    stageId: task.stageId,
     orderIndex: task.orderIndex,
     notes: task.notes,
     createdAt: task.createdAt.toISOString(),
@@ -73,12 +75,47 @@ export async function listAllTasksForUser(userId: string) {
   }));
 }
 
+/** A task can only be closed (DONE) once every checklist item under it is completed. */
+async function assertChecklistComplete(taskIds: string[]) {
+  const pending = await prisma.checklistItem.groupBy({
+    by: ["taskId"],
+    where: { taskId: { in: taskIds }, status: "PENDING" },
+    _count: { _all: true },
+  });
+  if (pending.length === 0) return;
+  const tasks = await prisma.task.findMany({ where: { id: { in: pending.map((p) => p.taskId) } } });
+  const titleById = new Map(tasks.map((t) => [t.id, t.title]));
+  const detail = pending
+    .map((p) => `"${titleById.get(p.taskId) ?? p.taskId}" (${p._count._all} open)`)
+    .join(", ");
+  throw new AppError(
+    409,
+    "CHECKLIST_INCOMPLETE",
+    `Complete all checklist items before closing the task: ${detail}`,
+    pending.map((p) => ({ taskId: p.taskId, openItems: p._count._all }))
+  );
+}
+
+/** stageId must belong to the same project, and work can't be added to (or reopened in)
+ * a stage that's already been completed — that would break the lifecycle's guarantee
+ * that a completed stage has no open tasks. */
+async function assertStageWritable(projectId: string, stageId: string | null | undefined) {
+  if (!stageId) return;
+  const stage = await prisma.projectStage.findUnique({ where: { id: stageId } });
+  if (!stage || stage.projectId !== projectId) throw AppError.badRequest("stageId must belong to this project");
+  if (stage.completedAt) {
+    throw new AppError(409, "STAGE_COMPLETED", `Stage "${stage.name}" is already completed — open tasks can't be added to it`);
+  }
+}
+
 export async function createTask(userId: string, projectId: string, input: CreateTaskInput) {
   await assertProjectAccess(userId, projectId);
+  await assertStageWritable(projectId, input.stageId);
   const maxOrder = await prisma.task.aggregate({ where: { projectId }, _max: { orderIndex: true } });
   const task = await prisma.task.create({
     data: {
       projectId,
+      stageId: input.stageId ?? null,
       title: input.title,
       description: input.description,
       priority: input.priority,
@@ -106,10 +143,25 @@ export async function updateTask(userId: string, taskId: string, input: UpdateTa
   const becomingDone = input.status === "DONE" && existing.status !== "DONE";
   const newDueDate = input.dueDate !== undefined ? (input.dueDate ? new Date(input.dueDate) : null) : undefined;
 
+  if (becomingDone) await assertChecklistComplete([taskId]);
+
+  // Reopening a task (or moving an open task) inside a completed stage would leave
+  // that stage "completed" with open work in it.
+  const nextStatus = input.status ?? existing.status;
+  const nextStageId = input.stageId !== undefined ? input.stageId : existing.stageId;
+  const isOpen = nextStatus === "TODO" || nextStatus === "IN_PROGRESS";
+  if (isOpen && (input.stageId !== undefined || input.status !== undefined)) {
+    await assertStageWritable(existing.projectId, nextStageId);
+  } else if (input.stageId) {
+    const stage = await prisma.projectStage.findUnique({ where: { id: input.stageId } });
+    if (!stage || stage.projectId !== existing.projectId) throw AppError.badRequest("stageId must belong to this project");
+  }
+
   const task = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({
       where: { id: taskId },
       data: {
+        stageId: input.stageId,
         title: input.title,
         description: input.description,
         priority: input.priority,
@@ -161,6 +213,10 @@ export async function duplicateTask(userId: string, taskId: string) {
         description: original.description,
         priority: original.priority,
         status: "TODO",
+        // Keep the copy in the same stage only while that stage is still open.
+        stageId: original.stageId && !(await tx.projectStage.findUnique({ where: { id: original.stageId } }))?.completedAt
+          ? original.stageId
+          : null,
         startDate: original.startDate,
         dueDate: original.dueDate,
         notes: original.notes,
@@ -211,6 +267,7 @@ export async function bulkCompleteTasks(userId: string, taskIds: string[]) {
   for (const id of taskIds) {
     await assertTaskAccess(userId, id);
   }
+  await assertChecklistComplete(taskIds);
   await prisma.$transaction(async (tx) => {
     for (const id of taskIds) {
       await tx.task.update({ where: { id }, data: { status: "DONE", completedAt: new Date() } });

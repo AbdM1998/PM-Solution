@@ -6,6 +6,8 @@ import { asyncHandler } from "../../lib/error-handler";
 import * as projectsService from "./service";
 import { tasksRouterForProject } from "../tasks/routes";
 import { emailThreadsRouterForProject } from "../email/routes";
+import { stagesRouterForProject } from "../stages/routes";
+import { attachmentsRouterForProject } from "../attachments/routes";
 
 export const projectsRouter = Router();
 projectsRouter.use(requireAuth);
@@ -62,3 +64,5 @@ projectsRouter.get(
 
 projectsRouter.use("/:projectId/tasks", tasksRouterForProject);
 projectsRouter.use("/:projectId/email-threads", emailThreadsRouterForProject);
+projectsRouter.use("/:projectId/stages", stagesRouterForProject);
+projectsRouter.use("/:projectId/attachments", attachmentsRouterForProject);

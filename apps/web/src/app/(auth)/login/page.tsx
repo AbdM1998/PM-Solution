@@ -7,7 +7,8 @@ import { LoginInput } from "@projectflow/shared";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, FieldError } from "@/components/ui/Input";
-import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import { useApi, useAuth } from "@/lib/auth-context";
 import { errorMessage } from "@/lib/utils";
 
 export default function LoginPage() {
@@ -20,6 +21,8 @@ export default function LoginPage() {
 
 function LoginForm() {
   const { login } = useAuth();
+  const api = useApi();
+  const { data: authConfig } = useQuery({ queryKey: ["auth-config"], queryFn: () => api.authConfig(), retry: false });
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -91,12 +94,18 @@ function LoginForm() {
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
-      <p className="mt-5 text-center text-sm text-zinc-500 dark:text-zinc-400">
-        Don&apos;t have an account?{" "}
-        <Link href="/register" className="font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400">
-          Create one
-        </Link>
-      </p>
+      {authConfig?.registrationOpen === false ? (
+        <p className="mt-5 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          Need an account? Ask your administrator.
+        </p>
+      ) : (
+        <p className="mt-5 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          Don&apos;t have an account?{" "}
+          <Link href="/register" className="font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400">
+            Create one
+          </Link>
+        </p>
+      )}
     </Card>
   );
 }

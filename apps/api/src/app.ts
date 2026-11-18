@@ -19,11 +19,15 @@ import { tagsRouter } from "./modules/tags/routes";
 import { healthRouter } from "./modules/health/routes";
 import { adminRouter } from "./modules/admin/routes";
 import { reportsRouter } from "./modules/reports/routes";
+import { attachmentsRouter } from "./modules/attachments/routes";
 
 export function createApp() {
   const app = express();
 
   app.disable("x-powered-by");
+  // Behind Nginx (production) the client IP arrives in X-Forwarded-For; without this
+  // every request looks like it comes from the proxy and the rate limits become global.
+  if (process.env.TRUST_PROXY) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
   app.use(helmet());
 
   // Explicit allow-list (docs/SECURITY.md), not "*".
@@ -71,6 +75,7 @@ export function createApp() {
   app.use("/api/tags", tagsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/reports", reportsRouter);
+  app.use("/api/attachments", attachmentsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

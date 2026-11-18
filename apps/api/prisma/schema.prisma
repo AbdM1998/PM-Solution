@@ -121,6 +121,12 @@ model User {
   // first admin on any fresh install (including one someone else sets up from
   // scratch) without a manual DB edit. Admin-only: GET/PATCH/DELETE under /api/admin.
   isAdmin      Boolean  @default(false)
+  // Deactivated accounts can't log in or refresh a session, but keep all their data
+  // (projects, tasks, history) — the non-destructive alternative to deleting a user.
+  isActive     Boolean  @default(true)
+  // Account-level WhatsApp destination (international format, e.g. 9627XXXXXXXX),
+  // used when a reminder has no targetWhatsappNumber override of its own.
+  whatsappNumber String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -156,6 +162,7 @@ model Project {
 
   members      ProjectMember[]
   tasks        Task[]
+  stages       ProjectStage[]
   tags         ProjectTag[]
   emailThreads EmailThread[]
   attachments  Attachment[]
@@ -177,12 +184,35 @@ model ProjectMember {
   @@unique([projectId, userId])
 }
 
+// A project's own lifecycle: an ordered list of stages (phases) defined per project.
+// The ACTIVE stage is the first one (by orderIndex) with completedAt = null; earlier
+// stages are completed, later ones locked. A stage can only be completed — and the
+// project moved on to the next one — once every task in it is DONE or CANCELLED (see
+// modules/stages/service.ts). Completing the last stage completes the project.
+model ProjectStage {
+  id          String    @id @default(uuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  orderIndex  Int       @default(0)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tasks Task[]
+
+  @@index([projectId])
+}
+
 // ---------- Tasks & Checklists ----------
 
 model Task {
   id            String     @id @default(uuid())
   projectId     String
   project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stageId       String?
+  stage         ProjectStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
   title         String
   description   String?
   status        TaskStatus @default(TODO)
@@ -203,6 +233,7 @@ model Task {
   activityLogs   ActivityLog[]
 
   @@index([projectId])
+  @@index([stageId])
   @@index([dueDate])
   @@index([status])
 }
@@ -498,7 +529,13 @@ model Attachment {
   checklistItem   ChecklistItem? @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
   emailMessageId  String?
   emailMessage    EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: Cascade)
+  // Who uploaded it (plain id, not a relation: deleting a user must not delete the
+  // project's files). Null for attachments extracted from imported emails.
+  uploadedById    String?
   createdAt       DateTime      @default(now())
+
+  @@index([projectId])
+  @@index([taskId])
 }
 
 model ActivityLog {

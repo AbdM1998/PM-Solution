@@ -43,9 +43,45 @@ export const CreateTaskInput = z.object({
   dueDate: z.string().datetime().optional(),
   assignedUserId: z.string().optional(),
   notes: z.string().max(5000).optional(),
+  // Lifecycle stage this task belongs to (null = not tied to any stage).
+  stageId: z.string().nullable().optional(),
 });
 export const UpdateTaskInput = CreateTaskInput.partial().extend({
   status: TaskStatusEnum.optional(),
+});
+
+// ---------- Project lifecycle (stages) ----------
+export const CreateStageInput = z.object({
+  name: z.string().min(1).max(120),
+  description: z.string().max(2000).optional(),
+});
+export const UpdateStageInput = CreateStageInput.partial();
+export const ReorderStagesInput = z.array(z.object({ stageId: z.string(), newIndex: z.number().int().min(0) }));
+export const StagePresetEnum = z.enum(["standard", "software", "construction"]);
+export const ApplyStagePresetInput = z.object({ preset: StagePresetEnum });
+
+// ---------- Admin ----------
+const WhatsappNumber = z
+  .string()
+  .regex(/^\+?[0-9]{8,15}$/, "Use international format, digits only (e.g. 9627XXXXXXXX)");
+
+export const AdminCreateUserInput = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(8),
+  isAdmin: z.boolean().optional(),
+  whatsappNumber: WhatsappNumber.optional(),
+});
+export const AdminUpdateUserInput = z.object({
+  name: z.string().min(1).max(120).optional(),
+  isAdmin: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  whatsappNumber: WhatsappNumber.nullable().optional(),
+  password: z.string().min(8).optional(),
+});
+export const AdminTestNotificationInput = z.object({
+  channel: z.enum(["EMAIL", "WHATSAPP"]),
+  to: z.string().min(3).max(200),
 });
 
 export const CreateChecklistItemInput = z.object({
@@ -122,3 +158,9 @@ export type CreateReminderInput = z.infer<typeof CreateReminderInput>;
 export type SnoozeOccurrenceInput = z.infer<typeof SnoozeOccurrenceInput>;
 export type CreateChecklistTemplateInput = z.infer<typeof CreateChecklistTemplateInput>;
 export type CreateEmailThreadInput = z.infer<typeof CreateEmailThreadInput>;
+export type CreateStageInput = z.infer<typeof CreateStageInput>;
+export type UpdateStageInput = z.infer<typeof UpdateStageInput>;
+export type StagePreset = z.infer<typeof StagePresetEnum>;
+export type AdminCreateUserInput = z.infer<typeof AdminCreateUserInput>;
+export type AdminUpdateUserInput = z.infer<typeof AdminUpdateUserInput>;
+export type AdminTestNotificationInput = z.infer<typeof AdminTestNotificationInput>;
