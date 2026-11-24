@@ -8,6 +8,10 @@ import type {
 
 export interface ApiClientOptions {
   baseUrl: string;
+  /** Where file uploads/downloads go, if different from baseUrl. Used when the web app
+   * is behind a proxy with a small request-body cap (Vercel: 4.5MB) — files then go
+   * straight to the API's own origin (bearer token auth, so cross-origin is fine). */
+  filesBaseUrl?: string;
   getAccessToken: () => string | null | undefined;
   onUnauthorized?: () => void;
 }
@@ -60,8 +64,8 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
-  private async fetchChecked(path: string, init: RequestInit): Promise<Response> {
-    const res = await fetch(`${this.opts.baseUrl}${path}`, init);
+  private async fetchChecked(path: string, init: RequestInit, baseUrl = this.opts.baseUrl): Promise<Response> {
+    const res = await fetch(`${baseUrl}${path}`, init);
     if (res.status === 401) {
       this.opts.onUnauthorized?.();
     }
@@ -79,7 +83,11 @@ export class ApiClient {
 
   /** multipart/form-data upload — no JSON Content-Type, the browser sets the boundary. */
   private async upload<T>(path: string, form: FormData): Promise<T> {
-    const res = await this.fetchChecked(path, { method: "POST", body: form, headers: this.authHeader() });
+    const res = await this.fetchChecked(
+      path,
+      { method: "POST", body: form, headers: this.authHeader() },
+      this.opts.filesBaseUrl ?? this.opts.baseUrl
+    );
     return res.json() as Promise<T>;
   }
 
@@ -335,7 +343,11 @@ export class ApiClient {
     return this.upload<Attachment>(`/projects/${projectId}/attachments`, form);
   }
   async downloadAttachment(id: string): Promise<Blob> {
-    const res = await this.fetchChecked(`/attachments/${id}/download`, { headers: this.authHeader() });
+    const res = await this.fetchChecked(
+      `/attachments/${id}/download`,
+      { headers: this.authHeader() },
+      this.opts.filesBaseUrl ?? this.opts.baseUrl
+    );
     return res.blob();
   }
   deleteAttachment(id: string) {

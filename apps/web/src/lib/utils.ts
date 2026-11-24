@@ -17,6 +17,13 @@ export function getApiBaseUrl(): string {
   return value;
 }
 
+/** Direct API origin for file uploads/downloads (e.g. https://api.example.up.railway.app/api)
+ * when the web app is hosted behind a body-size-limited proxy (Vercel). Unset = use the
+ * normal API base URL. */
+export function getFilesBaseUrl(): string | undefined {
+  return process.env.NEXT_PUBLIC_FILES_API_BASE_URL || undefined;
+}
+
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",

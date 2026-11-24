@@ -1,6 +1,7 @@
 // Entry point for the worker process (scheduler + dispatcher). Runs as a separate
 // Docker container/process from the API so a slow notification provider or a worker
 // crash never takes the HTTP API down, per docs/ARCHITECTURE.md.
+import http from "http";
 import cron from "node-cron";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
@@ -54,6 +55,19 @@ async function main() {
   // freshly-restarted worker starts catching up on overdue occurrences right away.
   await schedulerLoop();
   await dispatcherLoop();
+
+  // Optional liveness endpoint for hosts that health-check every service over HTTP
+  // (Railway). Off unless WORKER_HEALTH_PORT is set — the desktop app and Docker
+  // Compose don't need it.
+  const healthPort = Number(process.env.WORKER_HEALTH_PORT);
+  if (healthPort) {
+    http
+      .createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", role: "worker" }));
+      })
+      .listen(healthPort, () => logger.info(`Worker health endpoint on port ${healthPort}`));
+  }
 }
 
 main().catch((err) => {

@@ -6,7 +6,8 @@ const nextConfig = {
   // copied into .next/standalone) — used by the local/offline deployment package so
   // the target machine never needs its own `npm install`. Harmless for the Docker
   // build too; that Dockerfile still copies the full node_modules tree itself.
-  output: "standalone",
+  // Not on Vercel: Vercel packages the app its own way.
+  output: process.env.VERCEL ? undefined : "standalone",
   // Don't auto-generate apps/web/AGENTS.md on every `next dev` — this app already
   // follows the org's own AGENTS.md/architecture conventions at the repo root.
   agentRules: false,

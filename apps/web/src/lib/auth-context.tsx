@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiClient, type User } from "@projectflow/shared";
-import { getApiBaseUrl } from "./utils";
+import { getApiBaseUrl, getFilesBaseUrl } from "./utils";
 import { ACCESS_TOKEN_COOKIE, deleteCookie, getCookie, setCookie } from "./cookies";
 
 // Access token TTL matches JWT_ACCESS_TTL in .env.example (15 minutes). The readable
@@ -48,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // eslint-disable-next-line react-hooks/refs
       new ApiClient({
         baseUrl: getApiBaseUrl(),
+        filesBaseUrl: getFilesBaseUrl(),
         getAccessToken: () => tokenRef.current,
         onUnauthorized: () => clearAuth(),
       }),
