@@ -41,3 +41,6 @@ desktop/dist-installer/
 desktop/dist-installer2/
 desktop/dist-installer3/
 /ProjectFlow-Desktop.zip
+
+.vercel
+.env*.local

@@ -24,23 +24,23 @@
 ## 2) Railway — السيرفر وقاعدة البيانات
 
 **New Project ← Deploy from GitHub repo ← `PM-Solution`**. هذا بيعمل أول service، سمّيه **`api`**.
-ملف [`railway.json`](../railway.json) بالـ repo بيحدد كل إشي (Dockerfile، أمر التشغيل، health check)، فما في داعي تعدّل Build/Deploy settings.
+المتغير `RAILWAY_DOCKERFILE_PATH` (تحت) بيخلي Railway يبني من [`apps/api/Dockerfile`](../apps/api/Dockerfile)، وأمر التشغيل الافتراضي فيه هو [`start.sh`](../apps/api/start.sh) — بيطبّق الـ migrations وبيشغّل حسب `PF_ROLE`.
 
-ضيف بنفس المشروع:
-- **+ Create ← Database ← PostgreSQL** (اسمها بيكون `Postgres`)
-- **+ Create ← GitHub Repo ← نفس الـ repo** وسمّيه **`worker`**
+ضيف بنفس المشروع: **+ Create ← Database ← PostgreSQL** (اسمها بيكون `Postgres`).
+
+**على الخطة المجانية** (عدد خدمات محدود): خلي `PF_ROLE=all` على `api` — السيرفر ومحرك التذكيرات بنفس الخدمة، وما بتحتاج `worker`.
+**على Hobby** (أفضل): `api` بدون `PF_ROLE`، وضيف **+ Create ← GitHub Repo ← نفس الـ repo** وسمّيه **`worker`** بمتغيراته تحت.
 
 ### متغيرات `api` (Variables ← Raw Editor):
 ```
+RAILWAY_DOCKERFILE_PATH=apps/api/Dockerfile
+PF_ROLE=all
 NODE_ENV=production
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-JWT_SECRET=<openssl rand -base64 48>
-ENCRYPTION_KEY=<openssl rand -base64 32>
+JWT_SECRET=${{secret(64)}}
+ENCRYPTION_KEY=${{secret(32)}}
 WEB_ORIGIN=https://<اسم-مشروعك>.vercel.app
 ALLOW_REGISTRATION=false
-ADMIN_EMAIL=you@example.com
-ADMIN_PASSWORD=<كلمة سر قوية>
-ADMIN_NAME=Administrator
 TRUST_PROXY=2
 RAILWAY_RUN_UID=0
 SMTP_HOST=
@@ -62,8 +62,9 @@ WHATSAPP_TEMPLATE_LANG=ar
 ### دومين عام للـ API
 على `api`: **Settings ← Networking ← Generate Domain** ← بيعطيك مثل `https://api-production-xxxx.up.railway.app`. احفظه.
 
-### متغيرات `worker`:
+### متغيرات `worker` (بس مع Hobby):
 ```
+RAILWAY_DOCKERFILE_PATH=apps/api/Dockerfile
 PF_ROLE=worker
 NODE_ENV=production
 DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -99,7 +100,7 @@ WHATSAPP_TEMPLATE_LANG=${{api.WHATSAPP_TEMPLATE_LANG}}
 
 ## 4) أول دخول
 
-افتح رابط Vercel ← سجّل دخول بـ `ADMIN_EMAIL` / `ADMIN_PASSWORD` ← **Admin ← Users** لإضافة المستخدمين، و **Admin ← Notifications** لتجربة الإيميل والواتساب (إعدادهم مشروح بـ [GODADDY.md](GODADDY.md) الأقسام 7 و 8 — نفس المتغيرات، بس بتحطها بـ Railway Variables بدل ملف `.env`).
+افتح رابط Vercel ← **Create one** ← سجّل حسابك. أول حساب بيصير **Admin** تلقائياً، وبعده التسجيل بيتسكّر (`ALLOW_REGISTRATION=false`) ← **Admin ← Users** لإضافة المستخدمين، و **Admin ← Notifications** لتجربة الإيميل والواتساب (إعدادهم مشروح بـ [GODADDY.md](GODADDY.md) الأقسام 7 و 8 — نفس المتغيرات، بس بتحطها بـ Railway Variables بدل ملف `.env`).
 
 ## دومين خاص (اختياري)
 - **Vercel ← Project ← Settings ← Domains ← Add** ← `projectflow.yourcompany.com` ← حط سجل DNS اللي بيطلبه (CNAME) عند GoDaddy.

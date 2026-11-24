@@ -124,7 +124,8 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-# Default command = the API process. docker-compose.yml overrides `command:` for the
-# `worker` service to run dist/worker-entry.js from this exact same image instead,
-# and disables this HEALTHCHECK for that service (worker has no HTTP port).
-CMD ["node", "dist/server.js"]
+# Default command = start.sh: applies migrations, then the API — or, by PF_ROLE, the
+# reminder engine alone ("worker") or both in one container ("all"). Hosts like
+# Railway that just run the image's CMD get the right behavior from one variable.
+# docker-compose files override `command:` explicitly, so they're unaffected.
+CMD ["sh", "start.sh"]
