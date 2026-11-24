@@ -1,0 +1,23 @@
+# Uploaded by `vercel deploy` from the repo root (project Root Directory = apps/web).
+# Only the web app, the shared package and the workspace manifests (npm ci needs every
+# workspace's package.json + the root lockfile) are needed to build the site.
+releases/
+desktop/
+local/
+ProjectFlow-Local/
+infrastructure/
+deploy/
+docs/
+apps/mobile/*
+!apps/mobile/package.json
+apps/api/*
+!apps/api/package.json
+**/node_modules
+**/.next
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+*.rar
+*.zip
+*.exe
